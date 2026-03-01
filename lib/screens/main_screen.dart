@@ -21,7 +21,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final savedNotifier = SavedNotifierProvider.of(context);
+    final savedNotifier = SavedNotifierProvider.read(context);
     _pages ??= [
       HomePage(onProfileTap: () => setState(() => _index = 3)),
       const ExplorePage(),

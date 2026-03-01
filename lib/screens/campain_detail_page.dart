@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import '../services/database_helper.dart';
 import 'saved_campaigns.dart';
 import 'donate_page.dart';
 
@@ -35,10 +36,67 @@ class CampaignDetailPage extends StatefulWidget {
 class _CampaignDetailPageState extends State<CampaignDetailPage> {
   SavedCampaignsNotifier? _saved;
 
+  // ── Dynamic progress state ──
+  double _baseRaised = 0;
+  double _goalAmount = 0;
+  double _dbTotal = 0;
+  int _dbDonors = 0;
+
+  double get _currentRaised => _baseRaised + _dbTotal;
+  double get _currentProgress =>
+      _goalAmount > 0 ? (_currentRaised / _goalAmount).clamp(0.0, 1.0) : 0.0;
+  int get _currentDonors => widget.donorsCount + _dbDonors;
+  String get _raisedText => _formatAmount(_currentRaised);
+
+  @override
+  void initState() {
+    super.initState();
+    _baseRaised = _parseAmount(widget.raised);
+    _goalAmount = _parseAmount(widget.target);
+    _loadCampaignDonations();
+  }
+
+  Future<void> _loadCampaignDonations() async {
+    try {
+      final total = await DatabaseHelper.instance
+          .getTotalForCampaign(widget.title);
+      final donors = await DatabaseHelper.instance
+          .getDonorCountForCampaign(widget.title);
+      if (!mounted) return;
+      setState(() {
+        _dbTotal = total;
+        _dbDonors = donors;
+      });
+    } catch (_) {}
+  }
+
+  /// Parse "RM 45.2k" → 45200.0, "RM 50k" → 50000.0, "RM 800" → 800.0
+  static double _parseAmount(String s) {
+    var cleaned = s.replaceAll('RM', '').trim();
+    double multiplier = 1;
+    if (cleaned.toLowerCase().endsWith('k')) {
+      multiplier = 1000;
+      cleaned = cleaned.substring(0, cleaned.length - 1);
+    }
+    return (double.tryParse(cleaned) ?? 0) * multiplier;
+  }
+
+  /// Format 45300.0 → "RM 45.3k", 800.0 → "RM 800"
+  static String _formatAmount(double v) {
+    if (v >= 1000) {
+      final k = v / 1000;
+      final display = k == k.roundToDouble()
+          ? k.toInt().toString()
+          : k.toStringAsFixed(1);
+      return 'RM ${display}k';
+    }
+    return 'RM ${v.toStringAsFixed(0)}';
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final n = SavedNotifierProvider.of(context);
+    final n = SavedNotifierProvider.read(context);
     if (n != _saved) {
       _saved?.removeListener(_refresh);
       _saved = n;
@@ -404,7 +462,7 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(widget.raised,
+              Text(_raisedText,
                   style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w800,
@@ -422,7 +480,7 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: widget.progress.clamp(0.0, 1.0),
+              value: _currentProgress,
               minHeight: 8,
               backgroundColor: AppColors.primaryLight.withValues(alpha: 0.15),
               valueColor:
@@ -432,7 +490,7 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerRight,
-            child: Text('${(widget.progress * 100).toInt()}% funded',
+            child: Text('${(_currentProgress * 100).toInt()}% funded',
                 style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -446,7 +504,7 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
   Widget _buildStats() {
     return Row(
       children: [
-        _statBox(Icons.people_alt_rounded, '${widget.donorsCount}', 'Donors'),
+        _statBox(Icons.people_alt_rounded, '$_currentDonors', 'Donors'),
         const SizedBox(width: 12),
         _statBox(
             Icons.access_time_rounded, '${widget.daysLeft}', 'Days Left'),
@@ -577,12 +635,15 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
         ],
       ),
       child: GestureDetector(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) =>
-                  DonatePage(campaignTitle: widget.title)),
-        ),
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    DonatePage(campaignTitle: widget.title)),
+          );
+          _loadCampaignDonations();
+        },
         child: Container(
           height: 52,
           decoration: BoxDecoration(

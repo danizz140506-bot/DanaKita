@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter analyze:*)",
+      "Bash(flutter clean:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(dir:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(xargs grep -l \"class\\\\|void main\")",
+      "WebFetch(domain:newsapi.org)",
+      "Bash(git init)",
+      "Bash(git add .gitignore .metadata README.md analysis_options.yaml pubspec.yaml pubspec.lock lib/ assets/ test/ android/app/src/main/AndroidManifest.xml android/app/src/main/kotlin/ android/app/src/debug/ android/app/src/profile/ android/app/build.gradle.kts android/build.gradle.kts android/gradle.properties android/gradle/ android/settings.gradle.kts ios/ linux/ macos/ web/ windows/)",
+      "Bash(git commit:*)",
+      "Bash(git remote add origin https://github.com/danizz140506-bot/DanaKita.git)",
+      "Bash(git branch -M main)",
+      "Bash(git push -u origin main)"
+    ]
+  }
+}

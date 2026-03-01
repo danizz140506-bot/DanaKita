@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app_theme.dart';
+import '../models/donation.dart';
+import '../models/payment_method.dart';
 import '../models/payment_result.dart';
+import '../services/database_helper.dart';
 import '../services/payment_api_service.dart';
 
 class DonatePage extends StatefulWidget {
@@ -17,11 +20,14 @@ class _DonatePageState extends State<DonatePage> {
   int _payIdx = 0;
   bool _tip = false;
 
+  List<PaymentMethod> _payMethods = [];
+
   static const _presets = [10.0, 50.0, 100.0];
 
   @override
   void initState() {
     super.initState();
+    _loadPaymentMethods();
     _ctrl.addListener(() {
       final v = double.tryParse(_ctrl.text.trim().replaceAll(',', ''));
       if (v != null && !_presets.contains(v)) {
@@ -29,6 +35,20 @@ class _DonatePageState extends State<DonatePage> {
       }
     });
   }
+
+  Future<void> _loadPaymentMethods() async {
+    try {
+      final methods = await DatabaseHelper.instance.getAllPaymentMethods();
+      if (!mounted) return;
+      setState(() {
+        _payMethods = methods;
+        if (_payIdx >= _payMethods.length) _payIdx = 0;
+      });
+    } catch (_) {}
+  }
+
+  String get _selectedPayName =>
+      _payMethods.isNotEmpty ? _payMethods[_payIdx].type : 'Card';
 
   @override
   void dispose() {
@@ -65,9 +85,20 @@ class _DonatePageState extends State<DonatePage> {
         amount: _amount,
         tip: _tipAmt,
         total: _total,
-        paymentMethod: _payIdx == 0 ? 'Card' : 'e-Wallet',
+        paymentMethod: _selectedPayName,
         campaign: widget.campaignTitle ?? 'General Fund',
       );
+
+      // Save donation to local database
+      await DatabaseHelper.instance.insertDonation(Donation(
+        campaign: widget.campaignTitle ?? 'General Fund',
+        amount: _amount,
+        tip: _tipAmt,
+        total: _total,
+        paymentMethod: _selectedPayName,
+        transactionId: result.formattedId,
+        date: DateTime.now().toIso8601String(),
+      ));
 
       if (!mounted) return;
       setState(() => _isProcessing = false);
@@ -313,11 +344,14 @@ class _DonatePageState extends State<DonatePage> {
                   // ── Payment method ──
                   _sectionLabel('Payment Method'),
                   const SizedBox(height: 12),
-                  _payOption(
-                      0, 'Card', 'Visa ending in 4242', Icons.credit_card),
-                  const SizedBox(height: 10),
-                  _payOption(1, 'e-Wallet', 'Touch \'n Go / e-Wallet',
-                      Icons.account_balance_wallet_rounded),
+                  ..._payMethods.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final m = entry.value;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _payOption(i, m.type, m.label, m.icon),
+                    );
+                  }),
 
                   const SizedBox(height: 24),
 

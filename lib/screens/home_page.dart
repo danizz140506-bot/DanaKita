@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
 import 'campain_detail_page.dart';
 import 'notification_page.dart';
@@ -34,9 +35,60 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _catIndex = 0;
+  final Map<String, double> _dbTotals = {};
 
-  void _openDetail(_Campaign c) {
-    Navigator.push(
+  @override
+  void initState() {
+    super.initState();
+    _loadDbTotals();
+  }
+
+  Future<void> _loadDbTotals() async {
+    try {
+      for (final c in [..._urgentCampaigns, ..._recentCampaigns]) {
+        final total =
+            await DatabaseHelper.instance.getTotalForCampaign(c.title);
+        _dbTotals[c.title] = total;
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  static double _parseAmount(String s) {
+    var cleaned = s.replaceAll('RM', '').trim();
+    double multiplier = 1;
+    if (cleaned.toLowerCase().endsWith('k')) {
+      multiplier = 1000;
+      cleaned = cleaned.substring(0, cleaned.length - 1);
+    }
+    return (double.tryParse(cleaned) ?? 0) * multiplier;
+  }
+
+  static String _formatAmount(double v) {
+    if (v >= 1000) {
+      final k = v / 1000;
+      final display =
+          k == k.roundToDouble() ? k.toInt().toString() : k.toStringAsFixed(1);
+      return 'RM ${display}k';
+    }
+    return 'RM ${v.toStringAsFixed(0)}';
+  }
+
+  double _dynamicProgress(_Campaign c) {
+    final base = _parseAmount(c.raised);
+    final goal = _parseAmount(c.target);
+    final current = base + (_dbTotals[c.title] ?? 0);
+    return goal > 0 ? (current / goal).clamp(0.0, 1.0) : c.progress;
+  }
+
+  String _dynamicRaised(_Campaign c) {
+    final base = _parseAmount(c.raised);
+    final current = base + (_dbTotals[c.title] ?? 0);
+    return _formatAmount(current);
+  }
+
+  void _openDetail(_Campaign c) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CampaignDetailPage(
@@ -50,6 +102,7 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+    _loadDbTotals();
   }
 
   List<_Campaign> _filter(List<_Campaign> list) {
@@ -413,7 +466,7 @@ class _HomePageState extends State<HomePage> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
-                        value: c.progress,
+                        value: _dynamicProgress(c),
                         minHeight: 5,
                         backgroundColor: Colors.white.withValues(alpha: 0.3),
                         valueColor: const AlwaysStoppedAnimation(
@@ -424,12 +477,12 @@ class _HomePageState extends State<HomePage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('${c.raised} / ${c.target}',
+                        Text('${_dynamicRaised(c)} / ${c.target}',
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.85),
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500)),
-                        Text('${(c.progress * 100).toInt()}%',
+                        Text('${(_dynamicProgress(c) * 100).toInt()}%',
                             style: const TextStyle(
                                 color: AppColors.success,
                                 fontSize: 12,
@@ -494,7 +547,7 @@ class _HomePageState extends State<HomePage> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
-                              value: c.progress,
+                              value: _dynamicProgress(c),
                               minHeight: 5,
                               backgroundColor: AppColors.divider,
                               valueColor: const AlwaysStoppedAnimation(
@@ -503,7 +556,7 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Text('${(c.progress * 100).toInt()}%',
+                        Text('${(_dynamicProgress(c) * 100).toInt()}%',
                             style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,

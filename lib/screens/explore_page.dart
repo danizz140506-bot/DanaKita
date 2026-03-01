@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
 import 'campain_detail_page.dart';
 
@@ -12,6 +13,46 @@ class ExplorePage extends StatefulWidget {
 class _ExplorePageState extends State<ExplorePage> {
   int _catIndex = 0;
   String _query = '';
+
+  // DB donation totals per campaign
+  final Map<String, double> _dbTotals = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDbTotals();
+  }
+
+  Future<void> _loadDbTotals() async {
+    try {
+      for (final c in _campaigns) {
+        final title = c['title'] as String;
+        final total = await DatabaseHelper.instance.getTotalForCampaign(title);
+        _dbTotals[title] = total;
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  static double _parseAmount(String s) {
+    var cleaned = s.replaceAll('RM', '').trim();
+    double multiplier = 1;
+    if (cleaned.toLowerCase().endsWith('k')) {
+      multiplier = 1000;
+      cleaned = cleaned.substring(0, cleaned.length - 1);
+    }
+    return (double.tryParse(cleaned) ?? 0) * multiplier;
+  }
+
+  static String _formatAmount(double v) {
+    if (v >= 1000) {
+      final k = v / 1000;
+      final display =
+          k == k.roundToDouble() ? k.toInt().toString() : k.toStringAsFixed(1);
+      return 'RM ${display}k';
+    }
+    return 'RM ${v.toStringAsFixed(0)}';
+  }
 
   static const _campaigns = <Map<String, dynamic>>[
     {
@@ -193,22 +234,34 @@ class _ExplorePageState extends State<ExplorePage> {
   }
 
   Widget _buildCard(Map<String, dynamic> c) {
-    final progress = (c['progress'] as num).toDouble();
+    final title = c['title'] as String;
+    final baseRaised = _parseAmount(c['raised'] as String);
+    final goal = _parseAmount(c['target'] as String);
+    final dbTotal = _dbTotals[title] ?? 0;
+    final currentRaised = baseRaised + dbTotal;
+    final progress = goal > 0
+        ? (currentRaised / goal).clamp(0.0, 1.0)
+        : (c['progress'] as num).toDouble();
+    final raisedText = _formatAmount(currentRaised);
+
     return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CampaignDetailPage(
-            title: c['title'] as String,
-            description: c['description'] as String,
-            raised: c['raised'] as String,
-            target: c['target'] as String,
-            progress: progress,
-            imagePath: c['imagePath'] as String?,
-            category: c['category'] as String?,
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CampaignDetailPage(
+              title: title,
+              description: c['description'] as String,
+              raised: c['raised'] as String,
+              target: c['target'] as String,
+              progress: (c['progress'] as num).toDouble(),
+              imagePath: c['imagePath'] as String?,
+              category: c['category'] as String?,
+            ),
           ),
-        ),
-      ),
+        );
+        _loadDbTotals();
+      },
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.white,
@@ -232,7 +285,7 @@ class _ExplorePageState extends State<ExplorePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(c['title'] as String,
+                    Text(title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -252,7 +305,7 @@ class _ExplorePageState extends State<ExplorePage> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
-                              value: progress.clamp(0.0, 1.0),
+                              value: progress,
                               minHeight: 5,
                               backgroundColor: AppColors.divider,
                               valueColor: const AlwaysStoppedAnimation(
@@ -269,7 +322,7 @@ class _ExplorePageState extends State<ExplorePage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text('${c['raised']} / ${c['target']}',
+                    Text('$raisedText / ${c['target']}',
                         style: const TextStyle(
                             fontSize: 12, color: AppColors.textMuted)),
                   ],

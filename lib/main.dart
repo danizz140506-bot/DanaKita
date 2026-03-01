@@ -4,6 +4,7 @@ import 'screens/loading_page.dart';
 import 'screens/saved_campaigns.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   final savedNotifier = SavedCampaignsNotifier();
   SavedNotifierProvider.setFallback(savedNotifier);
   runApp(MyApp(savedNotifier: savedNotifier));

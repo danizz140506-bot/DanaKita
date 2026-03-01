@@ -47,11 +47,21 @@ class SavedNotifierProvider extends InheritedNotifier<SavedCampaignsNotifier> {
     _fallback = notifier;
   }
 
-  /// Returns the notifier from the nearest provider, or the fallback. Never returns null.
+  /// Returns the notifier **and** registers a rebuild dependency.
   static SavedCampaignsNotifier of(BuildContext context) {
     final notifier = context
         .dependOnInheritedWidgetOfExactType<SavedNotifierProvider>()
         ?.notifier;
+    return notifier ?? _fallback!;
+  }
+
+  /// Returns the notifier **without** registering a rebuild dependency.
+  /// Use this in `didChangeDependencies` or `build` methods that only need a
+  /// reference and already manage their own listener lifecycle.
+  static SavedCampaignsNotifier read(BuildContext context) {
+    final element =
+        context.getElementForInheritedWidgetOfExactType<SavedNotifierProvider>();
+    final notifier = (element?.widget as SavedNotifierProvider?)?.notifier;
     return notifier ?? _fallback!;
   }
 }
