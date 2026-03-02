@@ -14,7 +14,28 @@
       "Bash(git commit:*)",
       "Bash(git remote add origin https://github.com/danizz140506-bot/DanaKita.git)",
       "Bash(git branch -M main)",
-      "Bash(git push -u origin main)"
+      "Bash(git push -u origin main)",
+      "WebFetch(domain:www.chip-in.asia)",
+      "WebFetch(domain:docs.chip-in.asia)",
+      "WebFetch(domain:blog.chip-in.asia)",
+      "WebFetch(domain:developer.chip-in.asia)",
+      "WebFetch(domain:marketplace.whmcs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.shoppegram.com)",
+      "WebFetch(domain:support.easystore.co)",
+      "WebFetch(domain:docs.shoppego.com)",
+      "WebFetch(domain:guides.orderla.my)",
+      "Bash(curl -sL -o maybank.png \"https://logo.clearbit.com/maybank.com\")",
+      "Bash(curl -sL -o cimb.png \"https://logo.clearbit.com/cimb.com\")",
+      "Bash(curl -sL -o public_bank.png \"https://logo.clearbit.com/publicbank.com.my\")",
+      "Bash(curl -sL -o rhb.png \"https://logo.clearbit.com/rhbgroup.com\")",
+      "Bash(curl -v -sL -o /dev/null \"https://logo.clearbit.com/maybank.com\")",
+      "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"https://www.google.com\")",
+      "Bash(curl -sL -o maybank.png \"https://www.maybank.com/iwov-resources/images/maybank-logo.png\" -w \"%{http_code}\")",
+      "Bash(python3 -c \"from PIL import Image; print\\(''pillow available''\\)\")",
+      "Bash(python3 -c \"import pip; print\\(''pip available''\\)\")",
+      "Bash(python -c \"from PIL import Image; print\\(''ok''\\)\")",
+      "Bash(python -c \":*)"
     ]
   }
 }

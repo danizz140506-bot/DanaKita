@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_theme.dart';
 import '../models/payment_method.dart';
 import '../services/database_helper.dart';
@@ -37,111 +38,354 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     }
   }
 
-  // ── ADD ──────────────────────────────────────────────────────────────────
+  // ── ADD FLOW ──────────────────────────────────────────────────────────────
 
-  Future<void> _showAddDialog() async {
-    String selectedType = 'Card';
-    final labelCtrl = TextEditingController();
+  Future<void> _showAddFlow() async {
+    // Step 1: pick type
+    final type = await _pickType();
+    if (type == null || !mounted) return;
 
-    final result = await showDialog<bool>(
+    // Step 2: pick provider
+    final provider = await _pickProvider(type);
+    if (provider == null || !mounted) return;
+
+    // Step 3: enter credentials
+    final result = await _enterCredentials(type, provider);
+    if (result == null || !mounted) return;
+
+    // Save
+    final masked = maskCredential(result);
+    await DatabaseHelper.instance.insertPaymentMethod(
+      PaymentMethod(
+        type: type,
+        provider: provider.name,
+        label: '${provider.name} $masked',
+        credential: masked,
+      ),
+    );
+    await _loadMethods();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Payment method added'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    }
+  }
+
+  Future<String?> _pickType() async {
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => Dialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.xxl)),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Add Payment Method',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textDark)),
-                const SizedBox(height: 20),
-                const Text('Type',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textBody)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
-                  value: selectedType,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.md)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text('Select Payment Type',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 20),
+            _typeTile(ctx, 'FPX', 'Online Banking',
+                Icons.account_balance_rounded),
+            const SizedBox(height: 10),
+            _typeTile(
+                ctx, 'Card', 'Credit / Debit Card', Icons.credit_card_rounded),
+            const SizedBox(height: 10),
+            _typeTile(ctx, 'E-Wallet', 'E-Wallet',
+                Icons.account_balance_wallet_rounded),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _typeTile(
+      BuildContext ctx, String type, String label, IconData icon) {
+    return GestureDetector(
+      onTap: () => Navigator.pop(ctx, type),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.light,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Icon(icon, size: 22, color: AppColors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textDark)),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<PaymentProvider?> _pickProvider(String type) async {
+    final providers = providersForType(type);
+    return showModalBottomSheet<PaymentProvider>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text('Select ${type == 'FPX' ? 'Bank' : 'Provider'}',
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 16),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: providers.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (_, i) {
+                  final p = providers[i];
+                  return GestureDetector(
+                    onTap: () => Navigator.pop(ctx, p),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      child: Row(
+                        children: [
+                          _providerLogo(p.logoAsset, 36),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(p.name,
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textDark)),
+                          ),
+                          const Icon(Icons.chevron_right_rounded,
+                              color: AppColors.textMuted),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _enterCredentials(
+      String type, PaymentProvider provider) async {
+    final ctrl1 = TextEditingController();
+    final ctrl2 = TextEditingController();
+    final ctrl3 = TextEditingController();
+
+    String title;
+    String hint1;
+    String? hint2, hint3;
+    List<TextInputFormatter>? fmt1;
+    TextInputType kb1;
+
+    switch (type) {
+      case 'Card':
+        title = 'Card Details';
+        hint1 = 'Card Number';
+        hint2 = 'Expiry (MM/YY)';
+        hint3 = 'CVV';
+        kb1 = TextInputType.number;
+        fmt1 = [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(16),
+          _CardNumberFormatter(),
+        ];
+        break;
+      case 'FPX':
+        title = 'Bank Account';
+        hint1 = 'Account Number';
+        kb1 = TextInputType.number;
+        fmt1 = [FilteringTextInputFormatter.digitsOnly];
+        break;
+      default: // E-Wallet
+        title = 'E-Wallet Details';
+        hint1 = 'Phone Number';
+        kb1 = TextInputType.phone;
+        fmt1 = [FilteringTextInputFormatter.digitsOnly];
+        break;
+    }
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xxl)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _providerLogo(provider.logoAsset, 36),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark)),
+                        Text(provider.name,
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.textMuted)),
+                      ],
+                    ),
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'Card', child: Text('Card')),
-                    DropdownMenuItem(
-                        value: 'e-Wallet', child: Text('e-Wallet')),
-                    DropdownMenuItem(
-                        value: 'Bank Transfer',
-                        child: Text('Bank Transfer')),
-                  ],
-                  onChanged: (v) =>
-                      setDialogState(() => selectedType = v ?? 'Card'),
+                ],
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: ctrl1,
+                keyboardType: kb1,
+                inputFormatters: fmt1,
+                decoration: InputDecoration(
+                  hintText: hint1,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.md)),
                 ),
-                const SizedBox(height: 16),
-                const Text('Label',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textBody)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: labelCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'e.g. Maybank **** 1234',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.md)),
-                  ),
-                ),
-                const SizedBox(height: 24),
+              ),
+              if (hint2 != null) ...[
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel'),
+                      child: TextField(
+                        controller: ctrl2,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                              RegExp(r'[\d/]')),
+                          LengthLimitingTextInputFormatter(5),
+                        ],
+                        decoration: InputDecoration(
+                          hintText: hint2,
+                          border: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md)),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Add'),
+                    if (hint3 != null) ...[
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 90,
+                        child: TextField(
+                          controller: ctrl3,
+                          keyboardType: TextInputType.number,
+                          obscureText: true,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(4),
+                          ],
+                          decoration: InputDecoration(
+                            hintText: hint3,
+                            border: OutlineInputBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md)),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ],
-            ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (ctrl1.text.trim().isEmpty) return;
+                        Navigator.pop(ctx, ctrl1.text.trim());
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
     );
 
-    if (result == true && labelCtrl.text.trim().isNotEmpty) {
-      await DatabaseHelper.instance.insertPaymentMethod(
-        PaymentMethod(type: selectedType, label: labelCtrl.text.trim()),
-      );
-      await _loadMethods();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Payment method added'),
-            backgroundColor: AppColors.primary,
-          ),
-        );
-      }
-    }
-
-    labelCtrl.dispose();
+    ctrl1.dispose();
+    ctrl2.dispose();
+    ctrl3.dispose();
+    return result;
   }
 
   // ── DELETE ───────────────────────────────────────────────────────────────
@@ -276,7 +520,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                       milliseconds: 80 + (_methods.length * 60)),
                   duration: const Duration(milliseconds: 400),
                   child: OutlinedButton.icon(
-                    onPressed: _showAddDialog,
+                    onPressed: _showAddFlow,
                     icon: const Icon(Icons.add_rounded, size: 20),
                     label: const Text('Add payment method'),
                     style: OutlinedButton.styleFrom(
@@ -307,15 +551,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
       ),
       child: Row(
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Icon(m.icon, color: AppColors.primaryLight, size: 24),
-          ),
+          _providerLogo(m.logoPath, 48),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -373,6 +609,62 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Shared logo widget ───────────────────────────────────────────────────────
+
+Widget _providerLogo(String path, double size) {
+  if (path.isEmpty) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Icon(Icons.payment_rounded,
+          color: AppColors.textMuted, size: size * 0.5),
+    );
+  }
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(AppRadius.md),
+    child: Image.asset(
+      path,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Icon(Icons.payment_rounded,
+            color: AppColors.textMuted, size: size * 0.5),
+      ),
+    ),
+  );
+}
+
+// ── Card number formatter ────────────────────────────────────────────────────
+
+class _CardNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(' ', '');
+    final buf = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && i % 4 == 0) buf.write(' ');
+      buf.write(digits[i]);
+    }
+    final text = buf.toString();
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }

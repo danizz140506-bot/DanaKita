@@ -56,6 +56,7 @@ class AppColors {
 
   // Verified badge — on-theme green instead of blue
   static const Color verifiedBadge = Color(0xFF2E7D32);
+
 }
 
 /// Standardized border radii.

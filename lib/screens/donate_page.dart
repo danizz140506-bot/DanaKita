@@ -7,6 +7,27 @@ import '../models/payment_result.dart';
 import '../services/database_helper.dart';
 import '../services/payment_api_service.dart';
 
+// ── Payment category data (no DuitNow QR) ────────────────────────────────────
+
+class _PayCategory {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final String type; // maps to PaymentProvider.type
+  const _PayCategory(this.title, this.subtitle, this.icon, this.type);
+}
+
+const _categories = [
+  _PayCategory('FPX Online Banking', 'Pay directly from your bank',
+      Icons.account_balance_rounded, 'FPX'),
+  _PayCategory('Credit / Debit Card', 'Visa, Mastercard',
+      Icons.credit_card_rounded, 'Card'),
+  _PayCategory('E-Wallet', 'Touch \'n Go, GrabPay & more',
+      Icons.account_balance_wallet_rounded, 'E-Wallet'),
+];
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 class DonatePage extends StatefulWidget {
   final String? campaignTitle;
   const DonatePage({super.key, this.campaignTitle});
@@ -17,17 +38,22 @@ class DonatePage extends StatefulWidget {
 class _DonatePageState extends State<DonatePage> {
   final _ctrl = TextEditingController(text: '50.00');
   int _presetIdx = 1;
-  int _payIdx = 0;
   bool _tip = false;
 
-  List<PaymentMethod> _payMethods = [];
+  // Saved methods from DB
+  List<PaymentMethod> _savedMethods = [];
+  int? _savedMethodIdx; // selected saved method index
+
+  // Accordion state
+  int? _expandedCat;
+  String? _selectedProvider; // provider name selected from accordion
 
   static const _presets = [10.0, 50.0, 100.0];
 
   @override
   void initState() {
     super.initState();
-    _loadPaymentMethods();
+    _loadSavedMethods();
     _ctrl.addListener(() {
       final v = double.tryParse(_ctrl.text.trim().replaceAll(',', ''));
       if (v != null && !_presets.contains(v)) {
@@ -36,19 +62,27 @@ class _DonatePageState extends State<DonatePage> {
     });
   }
 
-  Future<void> _loadPaymentMethods() async {
+  Future<void> _loadSavedMethods() async {
     try {
       final methods = await DatabaseHelper.instance.getAllPaymentMethods();
       if (!mounted) return;
       setState(() {
-        _payMethods = methods;
-        if (_payIdx >= _payMethods.length) _payIdx = 0;
+        _savedMethods = methods;
+        // Auto-select first saved method
+        if (_savedMethods.isNotEmpty && _savedMethodIdx == null) {
+          _savedMethodIdx = 0;
+        }
       });
     } catch (_) {}
   }
 
-  String get _selectedPayName =>
-      _payMethods.isNotEmpty ? _payMethods[_payIdx].type : 'Card';
+  String get _selectedPayName {
+    if (_savedMethodIdx != null && _savedMethodIdx! < _savedMethods.length) {
+      return _savedMethods[_savedMethodIdx!].label;
+    }
+    if (_selectedProvider != null) return _selectedProvider!;
+    return '';
+  }
 
   @override
   void dispose() {
@@ -68,12 +102,175 @@ class _DonatePageState extends State<DonatePage> {
     });
   }
 
+  void _selectSaved(int idx) {
+    setState(() {
+      _savedMethodIdx = idx;
+      _selectedProvider = null; // clear accordion selection
+      _expandedCat = null;
+    });
+  }
+
+  void _selectFromAccordion(PaymentProvider provider) {
+    // Check if user already has this provider saved
+    final existing = _savedMethods.indexWhere(
+        (m) => m.provider == provider.name);
+    if (existing >= 0) {
+      _selectSaved(existing);
+      return;
+    }
+
+    // Not saved — prompt to add credentials
+    _promptAddCredentials(provider);
+  }
+
+  Future<void> _promptAddCredentials(PaymentProvider provider) async {
+    final credential = await _showCredentialDialog(provider);
+    if (credential == null || !mounted) return;
+
+    final masked = maskCredential(credential);
+    await DatabaseHelper.instance.insertPaymentMethod(
+      PaymentMethod(
+        type: provider.type,
+        provider: provider.name,
+        label: '${provider.name} $masked',
+        credential: masked,
+      ),
+    );
+    await _loadSavedMethods();
+
+    // Select the newly added method
+    if (mounted) {
+      final newIdx = _savedMethods.indexWhere(
+          (m) => m.provider == provider.name);
+      if (newIdx >= 0) {
+        setState(() {
+          _savedMethodIdx = newIdx;
+          _selectedProvider = null;
+          _expandedCat = null;
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${provider.name} added & selected'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    }
+  }
+
+  Future<String?> _showCredentialDialog(PaymentProvider provider) async {
+    final ctrl = TextEditingController();
+    String hint;
+    TextInputType kb;
+    List<TextInputFormatter>? fmt;
+
+    switch (provider.type) {
+      case 'Card':
+        hint = 'Card Number';
+        kb = TextInputType.number;
+        fmt = [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(16),
+        ];
+        break;
+      case 'FPX':
+        hint = 'Account Number';
+        kb = TextInputType.number;
+        fmt = [FilteringTextInputFormatter.digitsOnly];
+        break;
+      default:
+        hint = 'Phone Number';
+        kb = TextInputType.phone;
+        fmt = [FilteringTextInputFormatter.digitsOnly];
+        break;
+    }
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xxl)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _logo(provider.logoAsset, 36),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Add ${provider.name}',
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark)),
+                        Text('Enter your $hint',
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: ctrl,
+                keyboardType: kb,
+                inputFormatters: fmt,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.md)),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (ctrl.text.trim().isEmpty) return;
+                        Navigator.pop(ctx, ctrl.text.trim());
+                      },
+                      child: const Text('Add & Pay'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    ctrl.dispose();
+    return result;
+  }
+
   bool _isProcessing = false;
 
   Future<void> _confirm() async {
     if (_amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid donation amount')),
+      );
+      return;
+    }
+    if (_selectedPayName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a payment method')),
       );
       return;
     }
@@ -89,7 +286,6 @@ class _DonatePageState extends State<DonatePage> {
         campaign: widget.campaignTitle ?? 'General Fund',
       );
 
-      // Save donation to local database
       await DatabaseHelper.instance.insertDonation(Donation(
         campaign: widget.campaignTitle ?? 'General Fund',
         amount: _amount,
@@ -109,6 +305,8 @@ class _DonatePageState extends State<DonatePage> {
       _showErrorDialog(e.toString().replaceFirst('Exception: ', ''));
     }
   }
+
+  // ── Dialogs ────────────────────────────────────────────────────────────────
 
   void _showSuccessDialog(PaymentResult result) {
     showDialog(
@@ -132,11 +330,11 @@ class _DonatePageState extends State<DonatePage> {
                   width: 72,
                   height: 72,
                   decoration: const BoxDecoration(
-                    color: AppColors.surface,
+                    color: AppColors.light,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.check_rounded,
-                      color: AppColors.primaryLight, size: 40),
+                      color: AppColors.primary, size: 40),
                 ),
               ),
               const SizedBox(height: 20),
@@ -236,6 +434,8 @@ class _DonatePageState extends State<DonatePage> {
       ),
     );
   }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -341,17 +541,88 @@ class _DonatePageState extends State<DonatePage> {
 
                   const SizedBox(height: 28),
 
-                  // ── Payment method ──
-                  _sectionLabel('Payment Method'),
+                  // ── Saved payment methods ──
+                  if (_savedMethods.isNotEmpty) ...[
+                    _sectionLabel('Your Payment Methods'),
+                    const SizedBox(height: 12),
+                    ..._savedMethods.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final m = entry.value;
+                      final sel = _savedMethodIdx == i &&
+                          _selectedProvider == null;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: GestureDetector(
+                          onTap: () => _selectSaved(i),
+                          child: AnimatedContainer(
+                            duration: AppDurations.fast,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: sel
+                                  ? AppColors.light
+                                  : AppColors.white,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.lg),
+                              border: Border.all(
+                                color: sel
+                                    ? AppColors.primaryLight
+                                    : AppColors.border,
+                                width: sel ? 2 : 1,
+                              ),
+                              boxShadow: AppShadows.card,
+                            ),
+                            child: Row(
+                              children: [
+                                _logo(m.logoPath, 42),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(m.provider,
+                                          style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: sel
+                                                  ? AppColors.primaryLight
+                                                  : AppColors.textDark)),
+                                      Text(m.credential,
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              color: AppColors.textMuted)),
+                                    ],
+                                  ),
+                                ),
+                                if (sel)
+                                  Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.primaryLight,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.check,
+                                        size: 16, color: Colors.white),
+                                  )
+                                else
+                                  Icon(Icons.radio_button_off,
+                                      color: AppColors.iconMuted, size: 22),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // ── Accordion: "Or pay with" ──
+                  _sectionLabel(
+                      _savedMethods.isNotEmpty ? 'Or pay with' : 'Payment Method'),
                   const SizedBox(height: 12),
-                  ..._payMethods.asMap().entries.map((entry) {
-                    final i = entry.key;
-                    final m = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _payOption(i, m.type, m.label, m.icon),
-                    );
-                  }),
+                  ...List.generate(_categories.length, _buildCategory),
 
                   const SizedBox(height: 24),
 
@@ -396,18 +667,22 @@ class _DonatePageState extends State<DonatePage> {
                     ),
                     child: Column(
                       children: [
-                        _row('Donation',
+                        _summaryRow('Donation',
                             'RM ${_amount.toStringAsFixed(2)}'),
                         const SizedBox(height: 10),
-                        _row('Developer tip',
+                        _summaryRow('Developer tip',
                             'RM ${_tipAmt.toStringAsFixed(2)}'),
+                        if (_selectedPayName.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          _summaryRow('Pay via', _selectedPayName),
+                        ],
                         Padding(
                           padding:
                               const EdgeInsets.symmetric(vertical: 12),
                           child: Divider(color: AppColors.primaryLight
                               .withValues(alpha: 0.2)),
                         ),
-                        _row('Total',
+                        _summaryRow('Total',
                             'RM ${_total.toStringAsFixed(2)}',
                             bold: true),
                       ],
@@ -419,155 +694,106 @@ class _DonatePageState extends State<DonatePage> {
           ),
 
           // ── Confirm button ──
-          Container(
-            padding: EdgeInsets.fromLTRB(
-                20, 14, 20, MediaQuery.of(context).padding.bottom + 14),
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: GestureDetector(
-                    onTap: _isProcessing ? null : _confirm,
-                    child: AnimatedContainer(
-                      duration: AppDurations.fast,
-                      decoration: BoxDecoration(
-                        color: _isProcessing
-                            ? AppColors.soft.withValues(alpha: 0.5)
-                            : AppColors.soft,
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.md),
-                        boxShadow: _isProcessing ? [] : AppShadows.glow,
-                      ),
-                      child: _isProcessing
-                          ? const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                                SizedBox(width: 10),
-                                Text('Processing...',
-                                    style: TextStyle(
-                                        color: AppColors.primary,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700)),
-                              ],
-                            )
-                          : const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.check_rounded,
-                                    color: AppColors.primary, size: 22),
-                                SizedBox(width: 8),
-                                Text('Confirm Donation',
-                                    style: TextStyle(
-                                        color: AppColors.primary,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700)),
-                              ],
-                            ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.lock_rounded,
-                        size: 14, color: AppColors.textMuted),
-                    const SizedBox(width: 5),
-                    Text('Secure SSL Encrypted',
-                        style: TextStyle(
-                            fontSize: 12, color: AppColors.textMuted)),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          _buildConfirmBar(),
         ],
       ),
     );
   }
 
-  Widget _sectionLabel(String text) => Text(text,
-      style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textDark));
+  // ── Accordion category ─────────────────────────────────────────────────────
 
-  Widget _payOption(int idx, String title, String sub, IconData icon) {
-    final sel = _payIdx == idx;
-    return GestureDetector(
-      onTap: () => setState(() => _payIdx = idx),
+  Widget _buildCategory(int catIdx) {
+    final cat = _categories[catIdx];
+    final isExpanded = _expandedCat == catIdx;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
       child: AnimatedContainer(
         duration: AppDurations.fast,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: sel ? AppColors.surface : AppColors.white,
+          color: AppColors.white,
           borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(
-            color: sel ? AppColors.primaryLight : AppColors.border,
-            width: sel ? 2 : 1,
+            color: isExpanded
+                ? AppColors.primaryLight.withValues(alpha: 0.4)
+                : AppColors.border,
           ),
           boxShadow: AppShadows.card,
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: sel
-                    ? AppColors.primaryLight.withValues(alpha: 0.1)
-                    : AppColors.divider,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              child: Icon(icon,
-                  size: 22,
-                  color: sel ? AppColors.primaryLight : AppColors.textMuted),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: sel
+            // ── Header ──
+            GestureDetector(
+              onTap: () => setState(() {
+                _expandedCat = isExpanded ? null : catIdx;
+              }),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isExpanded ? AppColors.light : AppColors.white,
+                  borderRadius: isExpanded
+                      ? const BorderRadius.vertical(
+                          top: Radius.circular(AppRadius.lg))
+                      : BorderRadius.circular(AppRadius.lg),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: isExpanded
+                            ? AppColors.primaryLight.withValues(alpha: 0.12)
+                            : AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      child: Icon(cat.icon,
+                          size: 22,
+                          color: isExpanded
                               ? AppColors.primaryLight
-                              : AppColors.textDark)),
-                  const SizedBox(height: 2),
-                  Text(sub,
-                      style: const TextStyle(
-                          fontSize: 13, color: AppColors.textMuted)),
-                ],
+                              : AppColors.textMuted),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(cat.title,
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: isExpanded
+                                      ? AppColors.primaryLight
+                                      : AppColors.textDark)),
+                          const SizedBox(height: 2),
+                          Text(cat.subtitle,
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textMuted)),
+                        ],
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: isExpanded ? 0.5 : 0,
+                      duration: AppDurations.fast,
+                      child: const Icon(Icons.expand_more_rounded,
+                          color: AppColors.textMuted),
+                    ),
+                  ],
+                ),
               ),
             ),
-            Icon(
-              sel
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
-              color: sel ? AppColors.primaryLight : AppColors.iconMuted,
-              size: 22,
+
+            // ── Options (expanded) ──
+            AnimatedCrossFade(
+              firstChild: const SizedBox(width: double.infinity, height: 0),
+              secondChild: _buildProviderGrid(catIdx),
+              crossFadeState: isExpanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              duration: AppDurations.fast,
+              sizeCurve: Curves.easeInOut,
             ),
           ],
         ),
@@ -575,7 +801,202 @@ class _DonatePageState extends State<DonatePage> {
     );
   }
 
-  Widget _row(String label, String value, {bool bold = false}) {
+  // ── Provider grid inside a category ────────────────────────────────────────
+
+  Widget _buildProviderGrid(int catIdx) {
+    final cat = _categories[catIdx];
+    final providers = providersForType(cat.type);
+
+    // Cards: horizontal row
+    if (cat.type == 'Card') {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Row(
+          children: providers.map((p) {
+            final isSaved = _savedMethods.any((m) => m.provider == p.name);
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(
+                    right: p != providers.last ? 8 : 0),
+                child: GestureDetector(
+                  onTap: () => _selectFromAccordion(p),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: Column(
+                      children: [
+                        _logo(p.logoAsset, 36),
+                        const SizedBox(height: 6),
+                        Text(p.name,
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textBody)),
+                        if (isSaved)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Icon(Icons.check_circle_rounded,
+                                color: AppColors.primaryLight, size: 16),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }
+
+    // FPX banks & E-Wallets: 2-column grid with logos
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.8,
+        ),
+        itemCount: providers.length,
+        itemBuilder: (context, i) {
+          final p = providers[i];
+          final isSaved = _savedMethods.any((m) => m.provider == p.name);
+          return GestureDetector(
+            onTap: () => _selectFromAccordion(p),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Row(
+                children: [
+                  _logo(p.logoAsset, 28),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(p.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textDark)),
+                  ),
+                  if (isSaved)
+                    const Icon(Icons.check_circle_rounded,
+                        color: AppColors.primaryLight, size: 16),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Confirm bar ────────────────────────────────────────────────────────────
+
+  Widget _buildConfirmBar() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          20, 14, 20, MediaQuery.of(context).padding.bottom + 14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: GestureDetector(
+              onTap: _isProcessing ? null : _confirm,
+              child: AnimatedContainer(
+                duration: AppDurations.fast,
+                decoration: BoxDecoration(
+                  color: _isProcessing
+                      ? AppColors.soft.withValues(alpha: 0.5)
+                      : AppColors.soft,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  boxShadow: _isProcessing ? [] : AppShadows.glow,
+                ),
+                child: _isProcessing
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text('Processing...',
+                              style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.lock_rounded,
+                              color: AppColors.primary, size: 20),
+                          SizedBox(width: 8),
+                          Text('Pay Securely',
+                              style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.verified_user_rounded,
+                  size: 14, color: AppColors.primaryLight),
+              const SizedBox(width: 5),
+              Text('Secured by DanaKita',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryLight)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  Widget _sectionLabel(String text) => Text(text,
+      style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textDark));
+
+  Widget _summaryRow(String label, String value, {bool bold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -592,4 +1013,40 @@ class _DonatePageState extends State<DonatePage> {
       ],
     );
   }
+}
+
+// ── Logo widget ──────────────────────────────────────────────────────────────
+
+Widget _logo(String path, double size) {
+  if (path.isEmpty) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Icon(Icons.payment_rounded,
+          color: AppColors.textMuted, size: size * 0.5),
+    );
+  }
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(AppRadius.md),
+    child: Image.asset(
+      path,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Icon(Icons.payment_rounded,
+            color: AppColors.textMuted, size: size * 0.5),
+      ),
+    ),
+  );
 }

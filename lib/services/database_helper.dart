@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE donations (
@@ -37,11 +37,23 @@ class DatabaseHelper {
             date TEXT NOT NULL
           )
         ''');
-        await _createPaymentMethodsTable(db);
+        await _createPaymentMethodsTableV3(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          await _createPaymentMethodsTable(db);
+          // v1 → v2: create old payment_methods table (will be replaced in v3)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS payment_methods (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              type TEXT NOT NULL,
+              label TEXT NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 3) {
+          // v2 → v3: recreate with provider + credential columns
+          await db.execute('DROP TABLE IF EXISTS payment_methods');
+          await _createPaymentMethodsTableV3(db);
         }
       },
     );
@@ -128,20 +140,26 @@ class DatabaseHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // PAYMENT METHODS
+  // PAYMENT METHODS (v3 schema)
   // ══════════════════════════════════════════════════════════════════════════
 
-  static Future<void> _createPaymentMethodsTable(Database db) async {
+  static Future<void> _createPaymentMethodsTableV3(Database db) async {
     await db.execute('''
       CREATE TABLE payment_methods (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL,
-        label TEXT NOT NULL
+        provider TEXT NOT NULL,
+        label TEXT NOT NULL,
+        credential TEXT NOT NULL DEFAULT ''
       )
     ''');
-    // Seed defaults
-    await db.insert('payment_methods', {'type': 'Card', 'label': 'Visa ending in 4242'});
-    await db.insert('payment_methods', {'type': 'e-Wallet', 'label': 'Touch \'n Go / e-Wallet'});
+    // Seed a default card
+    await db.insert('payment_methods', {
+      'type': 'Card',
+      'provider': 'Visa',
+      'label': 'Visa ****4242',
+      'credential': '****4242',
+    });
   }
 
   /// Insert a new payment method.
