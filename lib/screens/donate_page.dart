@@ -6,6 +6,7 @@ import '../models/payment_method.dart';
 import '../models/payment_result.dart';
 import '../services/database_helper.dart';
 import '../services/payment_api_service.dart';
+import 'bank_login_page.dart';
 
 // ── Payment category data (no DuitNow QR) ────────────────────────────────────
 
@@ -119,15 +120,36 @@ class _DonatePageState extends State<DonatePage> {
       return;
     }
 
+    // FPX banks → navigate to bank login page
+    if (provider.type == 'FPX') {
+      _openBankLogin(provider);
+      return;
+    }
+
     // Not saved — prompt to add credentials
     _promptAddCredentials(provider);
   }
 
-  Future<void> _promptAddCredentials(PaymentProvider provider) async {
-    final credential = await _showCredentialDialog(provider);
-    if (credential == null || !mounted) return;
+  Future<void> _openBankLogin(PaymentProvider provider) async {
+    if (_amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a donation amount first')),
+      );
+      return;
+    }
 
-    final masked = maskCredential(credential);
+    final accountNum = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BankLoginPage(
+          provider: provider,
+          amount: _total,
+        ),
+      ),
+    );
+    if (accountNum == null || !mounted) return;
+
+    final masked = maskCredential(accountNum);
     await DatabaseHelper.instance.insertPaymentMethod(
       PaymentMethod(
         type: provider.type,
@@ -136,10 +158,11 @@ class _DonatePageState extends State<DonatePage> {
         credential: masked,
       ),
     );
-    await _loadSavedMethods();
-
-    // Select the newly added method
-    if (mounted) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadSavedMethods();
+      if (!mounted) return;
       final newIdx = _savedMethods.indexWhere(
           (m) => m.provider == provider.name);
       if (newIdx >= 0) {
@@ -155,14 +178,53 @@ class _DonatePageState extends State<DonatePage> {
           backgroundColor: AppColors.primary,
         ),
       );
-    }
+    });
+  }
+
+  Future<void> _promptAddCredentials(PaymentProvider provider) async {
+    final credential = await _showCredentialDialog(provider);
+    if (credential == null || !mounted) return;
+
+    final masked = maskCredential(credential);
+    await DatabaseHelper.instance.insertPaymentMethod(
+      PaymentMethod(
+        type: provider.type,
+        provider: provider.name,
+        label: '${provider.name} $masked',
+        credential: masked,
+      ),
+    );
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadSavedMethods();
+      if (!mounted) return;
+      final newIdx = _savedMethods.indexWhere(
+          (m) => m.provider == provider.name);
+      if (newIdx >= 0) {
+        setState(() {
+          _savedMethodIdx = newIdx;
+          _selectedProvider = null;
+          _expandedCat = null;
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${provider.name} added & selected'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    });
   }
 
   Future<String?> _showCredentialDialog(PaymentProvider provider) async {
     final ctrl = TextEditingController();
+    final expiryCtrl = TextEditingController();
+    final cvvCtrl = TextEditingController();
     String hint;
     TextInputType kb;
     List<TextInputFormatter>? fmt;
+    final isCard = provider.type == 'Card';
 
     switch (provider.type) {
       case 'Card':
@@ -228,6 +290,49 @@ class _DonatePageState extends State<DonatePage> {
                       borderRadius: BorderRadius.circular(AppRadius.md)),
                 ),
               ),
+              if (isCard) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: expiryCtrl,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                              RegExp(r'[\d/]')),
+                          LengthLimitingTextInputFormatter(5),
+                        ],
+                        decoration: InputDecoration(
+                          hintText: 'Expiry (MM/YY)',
+                          border: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: cvvCtrl,
+                        keyboardType: TextInputType.number,
+                        obscureText: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(4),
+                        ],
+                        decoration: InputDecoration(
+                          hintText: 'CVV',
+                          border: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
               Row(
                 children: [
@@ -256,6 +361,8 @@ class _DonatePageState extends State<DonatePage> {
     );
 
     ctrl.dispose();
+    expiryCtrl.dispose();
+    cvvCtrl.dispose();
     return result;
   }
 
@@ -574,7 +681,7 @@ class _DonatePageState extends State<DonatePage> {
                             ),
                             child: Row(
                               children: [
-                                _logo(m.logoPath, 42),
+                                _logo(m.logoPath, 32),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
@@ -828,7 +935,7 @@ class _DonatePageState extends State<DonatePage> {
                     ),
                     child: Column(
                       children: [
-                        _logo(p.logoAsset, 36),
+                        _logo(p.logoAsset, 28),
                         const SizedBox(height: 6),
                         Text(p.name,
                             style: const TextStyle(
@@ -878,7 +985,7 @@ class _DonatePageState extends State<DonatePage> {
               ),
               child: Row(
                 children: [
-                  _logo(p.logoAsset, 28),
+                  _logo(p.logoAsset, 22),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(p.name,
@@ -1036,7 +1143,7 @@ Widget _logo(String path, double size) {
       path,
       width: size,
       height: size,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => Container(
         width: size,
         height: size,

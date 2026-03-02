@@ -59,6 +59,12 @@ class PaymentMethod {
         return 'assets/images/payments/visa.webp';
       case 'Touch \'n Go':
         return 'assets/images/payments/tng.webp';
+      case 'Mastercard':
+        return 'assets/images/payments/mastercard.webp';
+      case 'CIMB':
+        return 'assets/images/payments/cimb.webp';
+      case 'GrabPay':
+        return 'assets/images/payments/grab.webp';
       default:
         return '';
     }
@@ -77,10 +83,13 @@ class PaymentProvider {
 const allProviders = [
   // FPX
   PaymentProvider('Maybank', 'FPX', 'assets/images/payments/maybank.webp'),
+  PaymentProvider('CIMB', 'FPX', 'assets/images/payments/cimb.webp'),
   // Card
   PaymentProvider('Visa', 'Card', 'assets/images/payments/visa.webp'),
+  PaymentProvider('Mastercard', 'Card', 'assets/images/payments/mastercard.webp'),
   // E-Wallet
   PaymentProvider('Touch \'n Go', 'E-Wallet', 'assets/images/payments/tng.webp'),
+  PaymentProvider('GrabPay', 'E-Wallet', 'assets/images/payments/grab.webp'),
 ];
 
 List<PaymentProvider> providersForType(String type) =>

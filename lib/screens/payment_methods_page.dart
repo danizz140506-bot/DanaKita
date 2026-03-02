@@ -4,6 +4,7 @@ import '../app_theme.dart';
 import '../models/payment_method.dart';
 import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
+import 'bank_login_page.dart';
 
 class PaymentMethodsPage extends StatefulWidget {
   const PaymentMethodsPage({super.key});
@@ -15,6 +16,7 @@ class PaymentMethodsPage extends StatefulWidget {
 class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
   List<PaymentMethod> _methods = [];
   bool _isLoading = true;
+  int? _defaultId;
 
   @override
   void initState() {
@@ -23,12 +25,17 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
   }
 
   Future<void> _loadMethods() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final methods = await DatabaseHelper.instance.getAllPaymentMethods();
       if (!mounted) return;
       setState(() {
         _methods = methods;
+        // Keep the current default if it still exists, otherwise pick the first
+        if (_defaultId == null || !methods.any((m) => m.id == _defaultId)) {
+          _defaultId = methods.isNotEmpty ? methods.first.id : null;
+        }
         _isLoading = false;
       });
     } catch (e) {
@@ -36,6 +43,16 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
       setState(() => _isLoading = false);
       debugPrint('DB error: $e');
     }
+  }
+
+  void _setDefault(PaymentMethod m) {
+    setState(() => _defaultId = m.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${m.provider} set as default'),
+        backgroundColor: AppColors.primary,
+      ),
+    );
   }
 
   // ── ADD FLOW ──────────────────────────────────────────────────────────────
@@ -49,8 +66,21 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     final provider = await _pickProvider(type);
     if (provider == null || !mounted) return;
 
-    // Step 3: enter credentials
-    final result = await _enterCredentials(type, provider);
+    // Step 3: FPX banks → bank login page, others → credential dialog
+    String? result;
+    if (type == 'FPX') {
+      result = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BankLoginPage(
+            provider: provider,
+            amount: 0, // no amount context from settings page
+          ),
+        ),
+      );
+    } else {
+      result = await _enterCredentials(type, provider);
+    }
     if (result == null || !mounted) return;
 
     // Save
@@ -63,15 +93,18 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
         credential: masked,
       ),
     );
-    await _loadMethods();
-    if (mounted) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadMethods();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Payment method added'),
           backgroundColor: AppColors.primary,
         ),
       );
-    }
+    });
   }
 
   Future<String?> _pickType() async {
@@ -204,7 +237,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                       ),
                       child: Row(
                         children: [
-                          _providerLogo(p.logoAsset, 36),
+                          _providerLogo(p.logoAsset, 28),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(p.name,
@@ -280,7 +313,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
             children: [
               Row(
                 children: [
-                  _providerLogo(provider.logoAsset, 36),
+                  _providerLogo(provider.logoAsset, 28),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -391,13 +424,6 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
   // ── DELETE ───────────────────────────────────────────────────────────────
 
   Future<void> _deleteMethod(PaymentMethod m) async {
-    if (_methods.length <= 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You need at least one payment method')),
-      );
-      return;
-    }
-
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -421,15 +447,18 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
 
     if (confirm == true) {
       await DatabaseHelper.instance.deletePaymentMethod(m.id!);
-      await _loadMethods();
-      if (mounted) {
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await _loadMethods();
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Payment method removed'),
             backgroundColor: AppColors.error,
           ),
         );
-      }
+      });
     }
   }
 
@@ -500,6 +529,55 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                 ),
                 const SizedBox(height: 20),
 
+                // ── Empty state ──
+                if (_methods.isEmpty)
+                  FadeIn(
+                    delay: const Duration(milliseconds: 80),
+                    duration: const Duration(milliseconds: 400),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 48),
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        borderRadius: BorderRadius.circular(AppRadius.xl),
+                        boxShadow: AppShadows.card,
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.credit_card_off_rounded,
+                              color: AppColors.textMuted,
+                              size: 32,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'No payment methods saved',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Add a payment method to get started',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textHint,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                 // ── Method cards ──
                 ...List.generate(_methods.length, (i) {
                   final m = _methods[i];
@@ -508,7 +586,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     duration: const Duration(milliseconds: 400),
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _methodTile(m, isDefault: i == 0),
+                      child: _methodTile(m, isDefault: m.id == _defaultId),
                     ),
                   );
                 }),
@@ -545,13 +623,16 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: isDefault ? AppColors.light : AppColors.white,
         borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: isDefault
+            ? Border.all(color: AppColors.primaryLight.withValues(alpha: 0.4))
+            : null,
         boxShadow: AppShadows.card,
       ),
       child: Row(
         children: [
-          _providerLogo(m.logoPath, 48),
+          _providerLogo(m.logoPath, 36),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -591,8 +672,22 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                 borderRadius: BorderRadius.circular(AppRadius.md)),
             onSelected: (v) {
               if (v == 'delete') _deleteMethod(m);
+              if (v == 'default') _setDefault(m);
             },
             itemBuilder: (_) => [
+              if (!isDefault)
+                const PopupMenuItem(
+                  value: 'default',
+                  child: Row(
+                    children: [
+                      Icon(Icons.star_rounded,
+                          size: 18, color: AppColors.primary),
+                      SizedBox(width: 8),
+                      Text('Set as default',
+                          style: TextStyle(color: AppColors.textDark)),
+                    ],
+                  ),
+                ),
               const PopupMenuItem(
                 value: 'delete',
                 child: Row(
@@ -634,7 +729,7 @@ Widget _providerLogo(String path, double size) {
       path,
       width: size,
       height: size,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => Container(
         width: size,
         height: size,
