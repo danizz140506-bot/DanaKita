@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../app_theme.dart';
 import '../models/donation.dart';
 import '../models/payment_method.dart';
@@ -48,6 +49,7 @@ class _DonatePageState extends State<DonatePage> {
   // Accordion state
   int? _expandedCat;
   String? _selectedProvider; // provider name selected from accordion
+  int? _defaultPaymentId;
 
   static const _presets = [10.0, 50.0, 100.0];
 
@@ -66,15 +68,27 @@ class _DonatePageState extends State<DonatePage> {
   Future<void> _loadSavedMethods() async {
     try {
       final methods = await DatabaseHelper.instance.getAllPaymentMethods();
+      final prefs = await SharedPreferences.getInstance();
+      final defaultId = prefs.getInt('default_payment_id');
+      
       if (!mounted) return;
       setState(() {
         _savedMethods = methods;
-        // Auto-select first saved method
+        _defaultPaymentId = defaultId;
         if (_savedMethods.isNotEmpty && _savedMethodIdx == null) {
-          _savedMethodIdx = 0;
+          // Auto-select the default method if it exists
+          if (defaultId != null) {
+            final idx = _savedMethods.indexWhere((m) => m.id == defaultId);
+            _savedMethodIdx = idx != -1 ? idx : 0;
+          } else {
+            // Otherwise fallback to the first saved method
+            _savedMethodIdx = 0;
+          }
         }
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading payment methods: $e');
+    }
   }
 
   String get _selectedPayName {
@@ -702,6 +716,22 @@ class _DonatePageState extends State<DonatePage> {
                                     ],
                                   ),
                                 ),
+                                if (m.id == _defaultPaymentId)
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.tagGreenBg,
+                                      borderRadius:
+                                          BorderRadius.circular(AppRadius.sm),
+                                    ),
+                                    child: const Text('Default',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.tagGreenText)),
+                                  ),
                                 if (sel)
                                   Container(
                                     width: 24,

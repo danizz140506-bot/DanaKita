@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE donations (
@@ -55,6 +55,11 @@ class DatabaseHelper {
           await db.execute('DROP TABLE IF EXISTS payment_methods');
           await _createPaymentMethodsTableV3(db);
         }
+        if (oldVersion < 4) {
+          // Version 4: Re-enforce schema in case device got stuck with an intermediate V3 state
+          await db.execute('DROP TABLE IF EXISTS payment_methods');
+          await _createPaymentMethodsTableV3(db);
+        }
       },
     );
   }
@@ -62,7 +67,12 @@ class DatabaseHelper {
   // ── CREATE ──────────────────────────────────────────────────────────────
 
   /// Insert a new donation and return its id.
+  ///
+  /// Throws [ArgumentError] if the total amount is negative or zero.
   Future<int> insertDonation(Donation donation) async {
+    if (donation.total <= 0) {
+      throw ArgumentError('Donation amount must be greater than zero.');
+    }
     final db = await database;
     return db.insert('donations', donation.toMap());
   }
@@ -162,11 +172,15 @@ class DatabaseHelper {
     });
   }
 
+  // ── CREATE ────────────────────────────────────────────────────────────
+
   /// Insert a new payment method.
   Future<int> insertPaymentMethod(PaymentMethod method) async {
     final db = await database;
     return db.insert('payment_methods', method.toMap());
   }
+
+  // ── READ ──────────────────────────────────────────────────────────────
 
   /// Get all payment methods.
   Future<List<PaymentMethod>> getAllPaymentMethods() async {
@@ -175,9 +189,30 @@ class DatabaseHelper {
     return rows.map((row) => PaymentMethod.fromMap(row)).toList();
   }
 
+  // ── UPDATE ────────────────────────────────────────────────────────────
+
+  /// Update an existing payment method's label and credential.
+  Future<int> updatePaymentMethod(PaymentMethod method) async {
+    final db = await database;
+    return db.update(
+      'payment_methods',
+      method.toMap(),
+      where: 'id = ?',
+      whereArgs: [method.id],
+    );
+  }
+
+  // ── DELETE ────────────────────────────────────────────────────────────
+
   /// Delete a payment method by id.
   Future<int> deletePaymentMethod(int id) async {
     final db = await database;
     return db.delete('payment_methods', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Delete all payment methods.
+  Future<int> deleteAllPaymentMethods() async {
+    final db = await database;
+    return db.delete('payment_methods');
   }
 }

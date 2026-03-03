@@ -67,7 +67,9 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
         _dbTotal = total;
         _dbDonors = donors;
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading campaign donations: $e');
+    }
   }
 
   /// Parse "RM 45.2k" → 45200.0, "RM 50k" → 50000.0, "RM 800" → 800.0

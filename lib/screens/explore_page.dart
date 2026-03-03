@@ -31,7 +31,9 @@ class _ExplorePageState extends State<ExplorePage> {
         _dbTotals[title] = total;
       }
       if (mounted) setState(() {});
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading DB totals: $e');
+    }
   }
 
   static double _parseAmount(String s) {

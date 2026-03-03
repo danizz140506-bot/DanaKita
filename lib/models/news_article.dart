@@ -28,6 +28,37 @@ class NewsArticle {
     );
   }
 
+  /// Convert this article back to a JSON-compatible map.
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'description': description,
+      'url': url,
+      'urlToImage': imageUrl,
+      'publishedAt': publishedAt,
+      'source': {'name': sourceName},
+    };
+  }
+
+  /// Create a copy with updated fields.
+  NewsArticle copyWith({
+    String? title,
+    String? description,
+    String? url,
+    String? imageUrl,
+    String? publishedAt,
+    String? sourceName,
+  }) {
+    return NewsArticle(
+      title: title ?? this.title,
+      description: description ?? this.description,
+      url: url ?? this.url,
+      imageUrl: imageUrl ?? this.imageUrl,
+      publishedAt: publishedAt ?? this.publishedAt,
+      sourceName: sourceName ?? this.sourceName,
+    );
+  }
+
   /// Friendly date string (e.g. "28 Jan 2025").
   String get formattedDate {
     try {
@@ -42,3 +73,4 @@ class NewsArticle {
     }
   }
 }
+

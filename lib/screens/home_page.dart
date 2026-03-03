@@ -51,7 +51,9 @@ class _HomePageState extends State<HomePage> {
         _dbTotals[c.title] = total;
       }
       if (mounted) setState(() {});
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading DB totals: $e');
+    }
   }
 
   static double _parseAmount(String s) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../app_theme.dart';
 import '../models/payment_method.dart';
 import '../services/database_helper.dart';
@@ -24,16 +25,21 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     _loadMethods();
   }
 
+  /// Only used on initial load.
   Future<void> _loadMethods() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final methods = await DatabaseHelper.instance.getAllPaymentMethods();
+      // Load persisted default
+      final prefs = await SharedPreferences.getInstance();
+      final savedDefault = prefs.getInt('default_payment_id');
       if (!mounted) return;
       setState(() {
         _methods = methods;
-        // Keep the current default if it still exists, otherwise pick the first
-        if (_defaultId == null || !methods.any((m) => m.id == _defaultId)) {
+        if (savedDefault != null && methods.any((m) => m.id == savedDefault)) {
+          _defaultId = savedDefault;
+        } else if (_defaultId == null || !methods.any((m) => m.id == _defaultId)) {
           _defaultId = methods.isNotEmpty ? methods.first.id : null;
         }
         _isLoading = false;
@@ -45,14 +51,31 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     }
   }
 
+  /// Schedule a setState for the next frame — avoids conflicts with
+  /// InheritedNotifier dependency tracking during route transitions.
+  void _safeSetState(VoidCallback fn) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(fn);
+    });
+  }
+
+  /// Safe snackbar helper — also deferred to next frame.
+  void _showSnack(String message, Color color) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: color),
+      );
+    });
+  }
+
   void _setDefault(PaymentMethod m) {
-    setState(() => _defaultId = m.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${m.provider} set as default'),
-        backgroundColor: AppColors.primary,
-      ),
-    );
+    _safeSetState(() => _defaultId = m.id);
+    // Persist to SharedPreferences
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setInt('default_payment_id', m.id!);
+    });
+    _showSnack('${m.provider} set as default', AppColors.primary);
   }
 
   // ── ADD FLOW ──────────────────────────────────────────────────────────────
@@ -74,7 +97,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
         MaterialPageRoute(
           builder: (_) => BankLoginPage(
             provider: provider,
-            amount: 0, // no amount context from settings page
+            amount: 0,
           ),
         ),
       );
@@ -83,28 +106,24 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     }
     if (result == null || !mounted) return;
 
-    // Save
+    // Save to DB
     final masked = maskCredential(result);
-    await DatabaseHelper.instance.insertPaymentMethod(
-      PaymentMethod(
-        type: type,
-        provider: provider.name,
-        label: '${provider.name} $masked',
-        credential: masked,
-      ),
+    final newMethod = PaymentMethod(
+      type: type,
+      provider: provider.name,
+      label: '${provider.name} $masked',
+      credential: masked,
     );
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+
+    try {
+      final id = await DatabaseHelper.instance.insertPaymentMethod(newMethod);
       if (!mounted) return;
-      await _loadMethods();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Payment method added'),
-          backgroundColor: AppColors.primary,
-        ),
-      );
-    });
+      // Update list in-memory — deferred to next frame for safety
+      _safeSetState(() => _methods = [..._methods, newMethod.copyWith(id: id)]);
+      _showSnack('Payment method added', AppColors.primary);
+    } catch (e) {
+      debugPrint('Error inserting payment method: $e');
+    }
   }
 
   Future<String?> _pickType() async {
@@ -415,9 +434,9 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
       ),
     );
 
-    ctrl1.dispose();
-    ctrl2.dispose();
-    ctrl3.dispose();
+    // Do not immediately dispose controllers here; the Dialog is still animating out for ~300ms.
+    // Disposing them instantly causes the TextFields to crash during the route transition,
+    // which corrupts the unmount sequence and triggers the `_dependents.isEmpty` assertion.
     return result;
   }
 
@@ -445,20 +464,110 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
       ),
     );
 
-    if (confirm == true) {
+    if (confirm != true || !mounted) return;
+
+    try {
       await DatabaseHelper.instance.deletePaymentMethod(m.id!);
       if (!mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
-        await _loadMethods();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Payment method removed'),
-            backgroundColor: AppColors.error,
+      // Update list in-memory — deferred to next frame for safety
+      _safeSetState(() => _methods = _methods.where((x) => x.id != m.id).toList());
+      _showSnack('Payment method removed', AppColors.error);
+    } catch (e) {
+      debugPrint('Error deleting payment method: $e');
+    }
+  }
+
+  // ── EDIT ─────────────────────────────────────────────────────────────────
+
+  Future<void> _editMethod(PaymentMethod m) async {
+    final labelCtrl = TextEditingController(text: m.label);
+
+    final newLabel = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xxl)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _providerLogo(m.logoPath, 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Edit Payment Method',
+                            style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark)),
+                        Text(m.provider,
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: labelCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Label',
+                  hintText: 'e.g. My Personal Card',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.md)),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final text = labelCtrl.text.trim();
+                        if (text.isEmpty) return;
+                        Navigator.pop(ctx, text);
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        );
+        ),
+      ),
+    );
+
+    // Do not immediately dispose labelCtrl here to prevent TextField unmount crash.
+
+    if (newLabel == null || !mounted) return;
+
+    try {
+      final updated = m.copyWith(label: newLabel);
+      await DatabaseHelper.instance.updatePaymentMethod(updated);
+      if (!mounted) return;
+      // Update list in-memory — deferred to next frame for safety
+      _safeSetState(() {
+        _methods =
+            _methods.map((x) => x.id == updated.id ? updated : x).toList();
       });
+      _showSnack('Payment method updated', AppColors.primary);
+    } catch (e) {
+      debugPrint('Error updating payment method: $e');
     }
   }
 
@@ -581,36 +690,27 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                 // ── Method cards ──
                 ...List.generate(_methods.length, (i) {
                   final m = _methods[i];
-                  return FadeIn(
-                    delay: Duration(milliseconds: 80 + (i * 60)),
-                    duration: const Duration(milliseconds: 400),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _methodTile(m, isDefault: m.id == _defaultId),
-                    ),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _methodTile(m, isDefault: m.id == _defaultId),
                   );
                 }),
 
                 // ── Add button ──
                 const SizedBox(height: 8),
-                FadeIn(
-                  delay: Duration(
-                      milliseconds: 80 + (_methods.length * 60)),
-                  duration: const Duration(milliseconds: 400),
-                  child: OutlinedButton.icon(
-                    onPressed: _showAddFlow,
-                    icon: const Icon(Icons.add_rounded, size: 20),
-                    label: const Text('Add payment method'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.primaryLight,
-                      side: const BorderSide(
-                          color: AppColors.primaryLight),
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.lg),
-                      ),
+                OutlinedButton.icon(
+                  onPressed: _showAddFlow,
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  label: const Text('Add payment method'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primaryLight,
+                    side: const BorderSide(
+                        color: AppColors.primaryLight),
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.lg),
                     ),
                   ),
                 ),
@@ -671,8 +771,14 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadius.md)),
             onSelected: (v) {
-              if (v == 'delete') _deleteMethod(m);
-              if (v == 'default') _setDefault(m);
+              // Delay by one frame so the popup menu route fully closes
+              // before we push another dialog/bottom-sheet.
+              Future.delayed(Duration.zero, () {
+                if (!mounted) return;
+                if (v == 'delete') _deleteMethod(m);
+                if (v == 'default') _setDefault(m);
+                if (v == 'edit') _editMethod(m);
+              });
             },
             itemBuilder: (_) => [
               if (!isDefault)
@@ -688,6 +794,18 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     ],
                   ),
                 ),
+              const PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_rounded,
+                        size: 18, color: AppColors.primaryLight),
+                    SizedBox(width: 8),
+                    Text('Edit',
+                        style: TextStyle(color: AppColors.textDark)),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'delete',
                 child: Row(
