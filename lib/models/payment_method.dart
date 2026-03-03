@@ -1,17 +1,18 @@
-/// Model representing a saved payment method with credentials.
+/// Model representing a saved/linked payment method.
+///
+/// Credentials are never stored locally — all sensitive data is handled
+/// securely by the CHIP payment gateway.
 class PaymentMethod {
   final int? id;
-  final String type;       // 'Card', 'FPX', 'E-Wallet'
-  final String provider;   // 'Maybank', 'Visa', 'ShopeePay', etc.
-  final String label;      // Display name: 'Visa ****4242'
-  final String credential; // Masked credential: '****4242'
+  final String type;     // 'Card', 'FPX', 'E-Wallet'
+  final String provider; // 'Maybank', 'Visa', 'ShopeePay', etc.
+  final String label;    // Display name: 'Visa', 'Maybank', etc.
 
   const PaymentMethod({
     this.id,
     required this.type,
     required this.provider,
     required this.label,
-    this.credential = '',
   });
 
   Map<String, dynamic> toMap() {
@@ -20,7 +21,6 @@ class PaymentMethod {
       'type': type,
       'provider': provider,
       'label': label,
-      'credential': credential,
     };
   }
 
@@ -30,7 +30,6 @@ class PaymentMethod {
       type: map['type'] as String,
       provider: (map['provider'] as String?) ?? '',
       label: map['label'] as String,
-      credential: (map['credential'] as String?) ?? '',
     );
   }
 
@@ -39,14 +38,12 @@ class PaymentMethod {
     String? type,
     String? provider,
     String? label,
-    String? credential,
   }) {
     return PaymentMethod(
       id: id ?? this.id,
       type: type ?? this.type,
       provider: provider ?? this.provider,
       label: label ?? this.label,
-      credential: credential ?? this.credential,
     );
   }
 
@@ -94,10 +91,3 @@ const allProviders = [
 
 List<PaymentProvider> providersForType(String type) =>
     allProviders.where((p) => p.type == type).toList();
-
-/// Mask a credential string, showing only the last 4 characters.
-String maskCredential(String raw) {
-  final cleaned = raw.replaceAll(RegExp(r'[\s\-/]'), '');
-  if (cleaned.length <= 4) return cleaned;
-  return '****${cleaned.substring(cleaned.length - 4)}';
-}

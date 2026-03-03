@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_theme.dart';
 import '../models/payment_method.dart';
 import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
-import 'bank_login_page.dart';
+import 'chip_checkout_page.dart';
 
 class PaymentMethodsPage extends StatefulWidget {
   const PaymentMethodsPage({super.key});
@@ -89,38 +89,40 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     final provider = await _pickProvider(type);
     if (provider == null || !mounted) return;
 
-    // Step 3: FPX banks → bank login page, others → credential dialog
-    String? result;
-    if (type == 'FPX') {
-      result = await Navigator.push<String>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => BankLoginPage(
-            provider: provider,
-            amount: 0,
-          ),
-        ),
-      );
-    } else {
-      result = await _enterCredentials(type, provider);
+    // Check if already saved
+    if (_methods.any((m) => m.provider == provider.name)) {
+      _showSnack('${provider.name} is already linked', AppColors.warning);
+      return;
     }
-    if (result == null || !mounted) return;
 
-    // Save to DB
-    final masked = maskCredential(result);
     final newMethod = PaymentMethod(
       type: type,
       provider: provider.name,
-      label: '${provider.name} $masked',
-      credential: masked,
+      label: provider.name,
     );
+
+    // Navigate to CHIP checkout page to link the account
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChipCheckoutPage(
+          method: newMethod,
+          amount: 0.0,
+          tip: 0.0,
+          total: 0.0,
+          campaign: 'Account Verification',
+        ),
+      ),
+    );
+
+    // If user cancelled or failed, stop here
+    if (result == null || !mounted) return;
 
     try {
       final id = await DatabaseHelper.instance.insertPaymentMethod(newMethod);
       if (!mounted) return;
-      // Update list in-memory — deferred to next frame for safety
       _safeSetState(() => _methods = [..._methods, newMethod.copyWith(id: id)]);
-      _showSnack('Payment method added', AppColors.primary);
+      _showSnack('${provider.name} linked via CHIP', AppColors.primary);
     } catch (e) {
       debugPrint('Error inserting payment method: $e');
     }
@@ -153,6 +155,9 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textDark)),
+            const SizedBox(height: 6),
+            const Text('Secured by CHIP payment gateway',
+                style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
             const SizedBox(height: 20),
             _typeTile(ctx, 'FPX', 'Online Banking',
                 Icons.account_balance_rounded),
@@ -245,6 +250,8 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
                   final p = providers[i];
+                  final alreadyLinked =
+                      _methods.any((m) => m.provider == p.name);
                   return GestureDetector(
                     onTap: () => Navigator.pop(ctx, p),
                     child: Container(
@@ -265,8 +272,12 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                                     fontWeight: FontWeight.w600,
                                     color: AppColors.textDark)),
                           ),
-                          const Icon(Icons.chevron_right_rounded,
-                              color: AppColors.textMuted),
+                          if (alreadyLinked)
+                            const Icon(Icons.check_circle_rounded,
+                                color: AppColors.primaryLight, size: 20)
+                          else
+                            const Icon(Icons.chevron_right_rounded,
+                                color: AppColors.textMuted),
                         ],
                       ),
                     ),
@@ -280,166 +291,6 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     );
   }
 
-  Future<String?> _enterCredentials(
-      String type, PaymentProvider provider) async {
-    final ctrl1 = TextEditingController();
-    final ctrl2 = TextEditingController();
-    final ctrl3 = TextEditingController();
-
-    String title;
-    String hint1;
-    String? hint2, hint3;
-    List<TextInputFormatter>? fmt1;
-    TextInputType kb1;
-
-    switch (type) {
-      case 'Card':
-        title = 'Card Details';
-        hint1 = 'Card Number';
-        hint2 = 'Expiry (MM/YY)';
-        hint3 = 'CVV';
-        kb1 = TextInputType.number;
-        fmt1 = [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(16),
-          _CardNumberFormatter(),
-        ];
-        break;
-      case 'FPX':
-        title = 'Bank Account';
-        hint1 = 'Account Number';
-        kb1 = TextInputType.number;
-        fmt1 = [FilteringTextInputFormatter.digitsOnly];
-        break;
-      default: // E-Wallet
-        title = 'E-Wallet Details';
-        hint1 = 'Phone Number';
-        kb1 = TextInputType.phone;
-        fmt1 = [FilteringTextInputFormatter.digitsOnly];
-        break;
-    }
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.xxl)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _providerLogo(provider.logoAsset, 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title,
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textDark)),
-                        Text(provider.name,
-                            style: const TextStyle(
-                                fontSize: 13, color: AppColors.textMuted)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: ctrl1,
-                keyboardType: kb1,
-                inputFormatters: fmt1,
-                decoration: InputDecoration(
-                  hintText: hint1,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.md)),
-                ),
-              ),
-              if (hint2 != null) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: ctrl2,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                              RegExp(r'[\d/]')),
-                          LengthLimitingTextInputFormatter(5),
-                        ],
-                        decoration: InputDecoration(
-                          hintText: hint2,
-                          border: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.md)),
-                        ),
-                      ),
-                    ),
-                    if (hint3 != null) ...[
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 90,
-                        child: TextField(
-                          controller: ctrl3,
-                          keyboardType: TextInputType.number,
-                          obscureText: true,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(4),
-                          ],
-                          decoration: InputDecoration(
-                            hintText: hint3,
-                            border: OutlineInputBorder(
-                                borderRadius:
-                                    BorderRadius.circular(AppRadius.md)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (ctrl1.text.trim().isEmpty) return;
-                        Navigator.pop(ctx, ctrl1.text.trim());
-                      },
-                      child: const Text('Save'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    // Do not immediately dispose controllers here; the Dialog is still animating out for ~300ms.
-    // Disposing them instantly causes the TextFields to crash during the route transition,
-    // which corrupts the unmount sequence and triggers the `_dependents.isEmpty` assertion.
-    return result;
-  }
-
   // ── DELETE ───────────────────────────────────────────────────────────────
 
   Future<void> _deleteMethod(PaymentMethod m) async {
@@ -449,7 +300,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.lg)),
         title: const Text('Remove Payment Method'),
-        content: Text('Remove "${m.label}"?'),
+        content: Text('Unlink "${m.provider}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -469,9 +320,8 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
     try {
       await DatabaseHelper.instance.deletePaymentMethod(m.id!);
       if (!mounted) return;
-      // Update list in-memory — deferred to next frame for safety
       _safeSetState(() => _methods = _methods.where((x) => x.id != m.id).toList());
-      _showSnack('Payment method removed', AppColors.error);
+      _showSnack('${m.provider} unlinked', AppColors.error);
     } catch (e) {
       debugPrint('Error deleting payment method: $e');
     }
@@ -501,7 +351,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Edit Payment Method',
+                        const Text('Edit Label',
                             style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
@@ -552,20 +402,17 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
       ),
     );
 
-    // Do not immediately dispose labelCtrl here to prevent TextField unmount crash.
-
     if (newLabel == null || !mounted) return;
 
     try {
       final updated = m.copyWith(label: newLabel);
       await DatabaseHelper.instance.updatePaymentMethod(updated);
       if (!mounted) return;
-      // Update list in-memory — deferred to next frame for safety
       _safeSetState(() {
         _methods =
             _methods.map((x) => x.id == updated.id ? updated : x).toList();
       });
-      _showSnack('Payment method updated', AppColors.primary);
+      _showSnack('Label updated', AppColors.primary);
     } catch (e) {
       debugPrint('Error updating payment method: $e');
     }
@@ -618,9 +465,9 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Saved methods',
+                            const Text('Linked methods',
                                 style: TextStyle(
-                                    color: AppColors.textMuted,
+                                    color: AppColors.textDark,
                                     fontSize: 14)),
                             const SizedBox(height: 4),
                             Text(
@@ -655,7 +502,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                           Container(
                             width: 64,
                             height: 64,
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               color: AppColors.surface,
                               shape: BoxShape.circle,
                             ),
@@ -667,7 +514,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'No payment methods saved',
+                            'No payment methods linked',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -676,7 +523,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                           ),
                           const SizedBox(height: 6),
                           const Text(
-                            'Add a payment method to get started',
+                            'Link a payment method via CHIP',
                             style: TextStyle(
                               fontSize: 13,
                               color: AppColors.textHint,
@@ -701,7 +548,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                 OutlinedButton.icon(
                   onPressed: _showAddFlow,
                   icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Add payment method'),
+                  label: const Text('Link payment method'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primaryLight,
                     side: const BorderSide(
@@ -714,6 +561,10 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     ),
                   ),
                 ),
+
+                // ── CHIP secured badge ──
+                const SizedBox(height: 20),
+                _chipSecuredBadge(),
               ],
             ),
     );
@@ -744,7 +595,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                         fontWeight: FontWeight.w600,
                         color: AppColors.textDark)),
                 const SizedBox(height: 2),
-                Text(m.type,
+                Text('${m.type} \u2022 via CHIP',
                     style: const TextStyle(
                         fontSize: 13, color: AppColors.textMuted)),
               ],
@@ -801,7 +652,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
                     Icon(Icons.edit_rounded,
                         size: 18, color: AppColors.primaryLight),
                     SizedBox(width: 8),
-                    Text('Edit',
+                    Text('Edit label',
                         style: TextStyle(color: AppColors.textDark)),
                   ],
                 ),
@@ -822,6 +673,15 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _chipSecuredBadge() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SvgPicture.asset('assets/images/powered-by-chip.svg', height: 24),
+      ],
     );
   }
 }
@@ -860,24 +720,4 @@ Widget _providerLogo(String path, double size) {
       ),
     ),
   );
-}
-
-// ── Card number formatter ────────────────────────────────────────────────────
-
-class _CardNumberFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
-    final digits = newValue.text.replaceAll(' ', '');
-    final buf = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      if (i > 0 && i % 4 == 0) buf.write(' ');
-      buf.write(digits[i]);
-    }
-    final text = buf.toString();
-    return TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
-  }
 }

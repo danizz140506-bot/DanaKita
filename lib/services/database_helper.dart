@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 4,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE donations (
@@ -37,28 +37,17 @@ class DatabaseHelper {
             date TEXT NOT NULL
           )
         ''');
-        await _createPaymentMethodsTableV3(db);
+        await _createPaymentMethodsTable(db);
+        await _createSavedCampaignsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          // v1 → v2: create old payment_methods table (will be replaced in v3)
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS payment_methods (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              type TEXT NOT NULL,
-              label TEXT NOT NULL
-            )
-          ''');
-        }
-        if (oldVersion < 3) {
-          // v2 → v3: recreate with provider + credential columns
+        if (oldVersion < 5) {
+          // v5: credentials removed — CHIP payment gateway handles all sensitive data
           await db.execute('DROP TABLE IF EXISTS payment_methods');
-          await _createPaymentMethodsTableV3(db);
+          await _createPaymentMethodsTable(db);
         }
-        if (oldVersion < 4) {
-          // Version 4: Re-enforce schema in case device got stuck with an intermediate V3 state
-          await db.execute('DROP TABLE IF EXISTS payment_methods');
-          await _createPaymentMethodsTableV3(db);
+        if (oldVersion < 6) {
+          await _createSavedCampaignsTable(db);
         }
       },
     );
@@ -150,25 +139,23 @@ class DatabaseHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // PAYMENT METHODS (v3 schema)
+  // PAYMENT METHODS (v5 — no credentials, handled by CHIP gateway)
   // ══════════════════════════════════════════════════════════════════════════
 
-  static Future<void> _createPaymentMethodsTableV3(Database db) async {
+  static Future<void> _createPaymentMethodsTable(Database db) async {
     await db.execute('''
       CREATE TABLE payment_methods (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL,
         provider TEXT NOT NULL,
-        label TEXT NOT NULL,
-        credential TEXT NOT NULL DEFAULT ''
+        label TEXT NOT NULL
       )
     ''');
-    // Seed a default card
+    // Seed a default card (linked via CHIP — no credentials stored)
     await db.insert('payment_methods', {
       'type': 'Card',
       'provider': 'Visa',
-      'label': 'Visa ****4242',
-      'credential': '****4242',
+      'label': 'Visa',
     });
   }
 
@@ -191,7 +178,7 @@ class DatabaseHelper {
 
   // ── UPDATE ────────────────────────────────────────────────────────────
 
-  /// Update an existing payment method's label and credential.
+  /// Update an existing payment method's label.
   Future<int> updatePaymentMethod(PaymentMethod method) async {
     final db = await database;
     return db.update(
@@ -214,5 +201,41 @@ class DatabaseHelper {
   Future<int> deleteAllPaymentMethods() async {
     final db = await database;
     return db.delete('payment_methods');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SAVED CAMPAIGNS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  static Future<void> _createSavedCampaignsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE saved_campaigns (
+        title TEXT PRIMARY KEY,
+        description TEXT,
+        raised TEXT,
+        target TEXT,
+        progress REAL,
+        imagePath TEXT,
+        category TEXT
+      )
+    ''');
+  }
+
+  /// Insert a saved campaign.
+  Future<int> insertSavedCampaign(Map<String, dynamic> campaign) async {
+    final db = await database;
+    return db.insert('saved_campaigns', campaign, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Get all saved campaigns.
+  Future<List<Map<String, dynamic>>> getAllSavedCampaigns() async {
+    final db = await database;
+    return db.query('saved_campaigns');
+  }
+
+  /// Delete a saved campaign by title.
+  Future<int> deleteSavedCampaign(String title) async {
+    final db = await database;
+    return db.delete('saved_campaigns', where: 'title = ?', whereArgs: [title]);
   }
 }

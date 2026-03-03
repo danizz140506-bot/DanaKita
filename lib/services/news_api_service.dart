@@ -30,9 +30,14 @@ class NewsApiService {
     int pageSize = 20,
     String sortBy = 'publishedAt',
   }) async {
+    final oneWeekAgo = DateTime.now().subtract(const Duration(days: 7));
+    final fromDate =
+        '${oneWeekAgo.year}-${oneWeekAgo.month.toString().padLeft(2, '0')}-${oneWeekAgo.day.toString().padLeft(2, '0')}';
+
     final uri = Uri.parse('$_baseUrl/everything').replace(
       queryParameters: {
         'q': query,
+        'from': fromDate,
         'pageSize': pageSize.toString(),
         'sortBy': sortBy,
         'language': 'en',

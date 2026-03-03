@@ -35,7 +35,10 @@
       "Bash(python3 -c \"from PIL import Image; print\\(''pillow available''\\)\")",
       "Bash(python3 -c \"import pip; print\\(''pip available''\\)\")",
       "Bash(python -c \"from PIL import Image; print\\(''ok''\\)\")",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(python3 -c \":*)",
+      "Bash(where python)",
+      "Bash(\"C:\\\\Users\\\\izkandar\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" -c \":*)"
     ]
   }
 }

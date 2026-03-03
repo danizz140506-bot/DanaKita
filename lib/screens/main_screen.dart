@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import '../providers/user_profile_provider.dart';
 import 'home_page.dart';
 import 'explore_page.dart';
 import 'saved_page.dart';
@@ -16,17 +17,33 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _index = 0;
   List<Widget>? _pages;
+  final _profileProvider = UserProfileProvider();
 
   static const _tabDuration = Duration(milliseconds: 280);
+
+  @override
+  void initState() {
+    super.initState();
+    _profileProvider.load();
+  }
+
+  @override
+  void dispose() {
+    _profileProvider.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final savedNotifier = SavedNotifierProvider.read(context);
     _pages ??= [
-      HomePage(onProfileTap: () => setState(() => _index = 3)),
+      HomePage(
+        onProfileTap: () => setState(() => _index = 3),
+        profileProvider: _profileProvider,
+      ),
       const ExplorePage(),
       SavedPage(notifier: savedNotifier),
-      const ProfilePage(),
+      ProfilePage(profileProvider: _profileProvider),
     ];
     final pages = _pages!;
 

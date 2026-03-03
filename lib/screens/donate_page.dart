@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_theme.dart';
@@ -6,8 +7,8 @@ import '../models/donation.dart';
 import '../models/payment_method.dart';
 import '../models/payment_result.dart';
 import '../services/database_helper.dart';
-import '../services/payment_api_service.dart';
-import 'bank_login_page.dart';
+// PaymentApiService is called from ChipCheckoutPage
+import 'chip_checkout_page.dart';
 
 // ── Payment category data (no DuitNow QR) ────────────────────────────────────
 
@@ -126,258 +127,100 @@ class _DonatePageState extends State<DonatePage> {
   }
 
   void _selectFromAccordion(PaymentProvider provider) {
-    // Check if user already has this provider saved
+    // Check if user already has this provider saved/linked
     final existing = _savedMethods.indexWhere(
         (m) => m.provider == provider.name);
     if (existing >= 0) {
-      _selectSaved(existing);
+      // Already saved — select it then redirect to CHIP checkout
+      setState(() {
+        _savedMethodIdx = existing;
+        _selectedProvider = null;
+        _expandedCat = null;
+      });
+      _openChipCheckout(_savedMethods[existing], isLinked: true);
       return;
     }
 
-    // FPX banks → navigate to bank login page
-    if (provider.type == 'FPX') {
-      _openBankLogin(provider);
-      return;
-    }
-
-    // Not saved — prompt to add credentials
-    _promptAddCredentials(provider);
+    // New provider — link it via CHIP gateway then open checkout
+    _linkAndPayProvider(provider);
   }
 
-  Future<void> _openBankLogin(PaymentProvider provider) async {
+  /// Link a new provider through the CHIP gateway then open checkout.
+  ///
+  /// Saves the provider first so it appears in "Your Payment Methods",
+  /// then immediately opens the CHIP checkout page for the user to
+  /// enter their credentials and pay.
+  Future<void> _linkAndPayProvider(PaymentProvider provider) async {
     if (_amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a donation amount first')),
+        const SnackBar(content: Text('Please enter a valid donation amount')),
       );
       return;
     }
 
-    final accountNum = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BankLoginPage(
-          provider: provider,
-          amount: _total,
-        ),
-      ),
-    );
-    if (accountNum == null || !mounted) return;
-
-    final masked = maskCredential(accountNum);
-    await DatabaseHelper.instance.insertPaymentMethod(
-      PaymentMethod(
-        type: provider.type,
-        provider: provider.name,
-        label: '${provider.name} $masked',
-        credential: masked,
-      ),
-    );
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      await _loadSavedMethods();
-      if (!mounted) return;
-      final newIdx = _savedMethods.indexWhere(
-          (m) => m.provider == provider.name);
-      if (newIdx >= 0) {
-        setState(() {
-          _savedMethodIdx = newIdx;
-          _selectedProvider = null;
-          _expandedCat = null;
-        });
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${provider.name} added & selected'),
-          backgroundColor: AppColors.primary,
-        ),
-      );
+    // 1. Select the provider in the UI without saving to DB
+    setState(() {
+      _savedMethodIdx = null; // Clear saved selection
+      _selectedProvider = provider.name;
+      _expandedCat = null;
     });
+
+    // 2. Immediately open CHIP checkout (credentials required)
+    final tempMethod = PaymentMethod(
+      type: provider.type,
+      provider: provider.name,
+      label: provider.name,
+    );
+    
+    _openChipCheckout(tempMethod, isLinked: false);
   }
 
-  Future<void> _promptAddCredentials(PaymentProvider provider) async {
-    final credential = await _showCredentialDialog(provider);
-    if (credential == null || !mounted) return;
-
-    final masked = maskCredential(credential);
-    await DatabaseHelper.instance.insertPaymentMethod(
-      PaymentMethod(
-        type: provider.type,
-        provider: provider.name,
-        label: '${provider.name} $masked',
-        credential: masked,
-      ),
-    );
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      await _loadSavedMethods();
-      if (!mounted) return;
-      final newIdx = _savedMethods.indexWhere(
-          (m) => m.provider == provider.name);
-      if (newIdx >= 0) {
-        setState(() {
-          _savedMethodIdx = newIdx;
-          _selectedProvider = null;
-          _expandedCat = null;
-        });
-      }
+  /// Navigate to the CHIP checkout page and handle the result.
+  ///
+  /// This simulates the real gateway redirect: user fills in credentials
+  /// on the CHIP hosted page, then returns to the app with confirmation.
+  Future<void> _openChipCheckout(PaymentMethod method, {bool isLinked = false}) async {
+    if (_amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${provider.name} added & selected'),
-          backgroundColor: AppColors.primary,
-        ),
+        const SnackBar(content: Text('Please enter a valid donation amount')),
       );
-    });
-  }
-
-  Future<String?> _showCredentialDialog(PaymentProvider provider) async {
-    final ctrl = TextEditingController();
-    final expiryCtrl = TextEditingController();
-    final cvvCtrl = TextEditingController();
-    String hint;
-    TextInputType kb;
-    List<TextInputFormatter>? fmt;
-    final isCard = provider.type == 'Card';
-
-    switch (provider.type) {
-      case 'Card':
-        hint = 'Card Number';
-        kb = TextInputType.number;
-        fmt = [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(16),
-        ];
-        break;
-      case 'FPX':
-        hint = 'Account Number';
-        kb = TextInputType.number;
-        fmt = [FilteringTextInputFormatter.digitsOnly];
-        break;
-      default:
-        hint = 'Phone Number';
-        kb = TextInputType.phone;
-        fmt = [FilteringTextInputFormatter.digitsOnly];
-        break;
+      return;
     }
 
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.xxl)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _logo(provider.logoAsset, 36),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Add ${provider.name}',
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textDark)),
-                        Text('Enter your $hint',
-                            style: const TextStyle(
-                                fontSize: 13, color: AppColors.textMuted)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: ctrl,
-                keyboardType: kb,
-                inputFormatters: fmt,
-                decoration: InputDecoration(
-                  hintText: hint,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.md)),
-                ),
-              ),
-              if (isCard) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: expiryCtrl,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                              RegExp(r'[\d/]')),
-                          LengthLimitingTextInputFormatter(5),
-                        ],
-                        decoration: InputDecoration(
-                          hintText: 'Expiry (MM/YY)',
-                          border: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.md)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 90,
-                      child: TextField(
-                        controller: cvvCtrl,
-                        keyboardType: TextInputType.number,
-                        obscureText: true,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(4),
-                        ],
-                        decoration: InputDecoration(
-                          hintText: 'CVV',
-                          border: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.md)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (ctrl.text.trim().isEmpty) return;
-                        Navigator.pop(ctx, ctrl.text.trim());
-                      },
-                      child: const Text('Add & Pay'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+    final result = await Navigator.push<PaymentResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChipCheckoutPage(
+          method: method,
+          amount: _amount,
+          tip: _tipAmt,
+          total: _total,
+          campaign: widget.campaignTitle ?? 'General Fund',
+          isLinked: isLinked,
         ),
       ),
     );
 
-    ctrl.dispose();
-    expiryCtrl.dispose();
-    cvvCtrl.dispose();
-    return result;
+    // User cancelled or CHIP page returned null
+    if (result == null || !mounted) return;
+
+    // Payment succeeded — save donation to DB
+    try {
+      await DatabaseHelper.instance.insertDonation(Donation(
+        campaign: widget.campaignTitle ?? 'General Fund',
+        amount: _amount,
+        tip: _tipAmt,
+        total: _total,
+        paymentMethod: method.provider,
+        transactionId: result.formattedId,
+        date: DateTime.now().toIso8601String(),
+      ));
+    } catch (_) {
+      // DB insert error shouldn't block showing success
+    }
+
+    if (!mounted) return;
+    _showSuccessDialog(result);
   }
 
   bool _isProcessing = false;
@@ -396,34 +239,32 @@ class _DonatePageState extends State<DonatePage> {
       return;
     }
 
-    setState(() => _isProcessing = true);
-
-    try {
-      final result = await PaymentApiService.processPayment(
-        amount: _amount,
-        tip: _tipAmt,
-        total: _total,
-        paymentMethod: _selectedPayName,
-        campaign: widget.campaignTitle ?? 'General Fund',
+    // Get the selected payment method object
+    if (_savedMethodIdx != null && _savedMethodIdx! < _savedMethods.length) {
+      final selectedMethod = _savedMethods[_savedMethodIdx!];
+      _openChipCheckout(selectedMethod, isLinked: true);
+    } else if (_selectedProvider != null) {
+      PaymentProvider? providerToUse;
+      for (final p in allProviders) {
+        if (p.name == _selectedProvider) {
+          providerToUse = p;
+          break;
+        }
+      }
+      
+      if (providerToUse != null) {
+        final tempMethod = PaymentMethod(
+          type: providerToUse.type,
+          provider: providerToUse.name,
+          label: providerToUse.name,
+        );
+        _openChipCheckout(tempMethod, isLinked: false);
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a payment method')),
       );
-
-      await DatabaseHelper.instance.insertDonation(Donation(
-        campaign: widget.campaignTitle ?? 'General Fund',
-        amount: _amount,
-        tip: _tipAmt,
-        total: _total,
-        paymentMethod: _selectedPayName,
-        transactionId: result.formattedId,
-        date: DateTime.now().toIso8601String(),
-      ));
-
-      if (!mounted) return;
-      setState(() => _isProcessing = false);
-      _showSuccessDialog(result);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isProcessing = false);
-      _showErrorDialog(e.toString().replaceFirst('Exception: ', ''));
+      return;
     }
   }
 
@@ -709,7 +550,7 @@ class _DonatePageState extends State<DonatePage> {
                                               color: sel
                                                   ? AppColors.primaryLight
                                                   : AppColors.textDark)),
-                                      Text(m.credential,
+                                      Text('${m.type} • via CHIP',
                                           style: const TextStyle(
                                               fontSize: 13,
                                               color: AppColors.textMuted)),
@@ -1110,14 +951,7 @@ class _DonatePageState extends State<DonatePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.verified_user_rounded,
-                  size: 14, color: AppColors.primaryLight),
-              const SizedBox(width: 5),
-              Text('Secured by DanaKita',
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryLight)),
+              SvgPicture.asset('assets/images/powered-by-chip.svg', height: 24),
             ],
           ),
         ],

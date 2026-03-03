@@ -6,7 +6,8 @@ import '../services/news_api_service.dart';
 import '../widgets/fade_in_widget.dart';
 
 class NotificationPage extends StatefulWidget {
-  const NotificationPage({super.key});
+  final String initialCategory;
+  const NotificationPage({super.key, this.initialCategory = 'All'});
 
   @override
   State<NotificationPage> createState() => _NotificationPageState();
@@ -22,7 +23,7 @@ class _NotificationPageState extends State<NotificationPage> {
     'Environment': 'clean water OR environment charity',
   };
 
-  String _selectedCategory = 'All';
+  late String _selectedCategory = widget.initialCategory;
   List<NewsArticle> _articles = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -30,7 +31,41 @@ class _NotificationPageState extends State<NotificationPage> {
   @override
   void initState() {
     super.initState();
+    // Validate the initial category; fall back to 'All' if not recognized.
+    if (!_categories.containsKey(_selectedCategory)) {
+      _selectedCategory = 'All';
+    }
     _fetchNews();
+  }
+
+  /// Keywords used to verify an article actually belongs to a category.
+  static const _categoryKeywords = <String, List<String>>{
+    'Disaster': [
+      'flood', 'earthquake', 'disaster', 'hurricane', 'wildfire', 'tsunami',
+      'typhoon', 'cyclone', 'tornado', 'landslide', 'drought', 'relief',
+      'emergency', 'evacuation', 'rescue',
+    ],
+    'Education': [
+      'school', 'education', 'student', 'teacher', 'university', 'scholarship',
+      'literacy', 'classroom', 'learning', 'tuition',
+    ],
+    'Medical': [
+      'medical', 'health', 'hospital', 'doctor', 'patient', 'disease',
+      'treatment', 'clinic', 'surgery', 'medicine', 'vaccine', 'nursing',
+    ],
+    'Environment': [
+      'water', 'environment', 'climate', 'pollution', 'ocean', 'forest',
+      'wildlife', 'renewable', 'conservation', 'ecosystem', 'recycling',
+      'clean energy', 'sustainability',
+    ],
+  };
+
+  /// Check whether an article's text matches any keyword for the given category.
+  bool _matchesCategory(NewsArticle article, String category) {
+    final keywords = _categoryKeywords[category];
+    if (keywords == null) return true; // 'All' — everything matches
+    final text = '${article.title} ${article.description}'.toLowerCase();
+    return keywords.any((kw) => text.contains(kw));
   }
 
   Future<void> _fetchNews() async {
@@ -43,7 +78,10 @@ class _NotificationPageState extends State<NotificationPage> {
       final query = _categories[_selectedCategory]!;
       final articles = await NewsApiService.fetchNews(query: query);
       setState(() {
-        _articles = articles;
+        // Drop articles that don't actually match the selected category.
+        _articles = _selectedCategory == 'All'
+            ? articles
+            : articles.where((a) => _matchesCategory(a, _selectedCategory)).toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -54,28 +92,13 @@ class _NotificationPageState extends State<NotificationPage> {
     }
   }
 
-  /// Map a keyword from the article title to a chip label.
-  String _inferType(String title) {
-    final lower = title.toLowerCase();
-    if (lower.contains('flood') ||
-        lower.contains('earthquake') ||
-        lower.contains('disaster') ||
-        lower.contains('hurricane') ||
-        lower.contains('wildfire')) {
-      return 'Disaster';
-    }
-    if (lower.contains('school') ||
-        lower.contains('education') ||
-        lower.contains('student')) {
-      return 'Education';
-    }
-    if (lower.contains('medical') ||
-        lower.contains('health') ||
-        lower.contains('hospital')) {
-      return 'Medical';
-    }
-    if (lower.contains('water') || lower.contains('environment')) {
-      return 'Environment';
+  /// Map a keyword from the article title/description to a chip label.
+  String _inferType(NewsArticle article) {
+    for (final entry in _categoryKeywords.entries) {
+      final text = '${article.title} ${article.description}'.toLowerCase();
+      if (entry.value.any((kw) => text.contains(kw))) {
+        return entry.key;
+      }
     }
     return 'News';
   }
@@ -288,7 +311,7 @@ class _NotificationPageState extends State<NotificationPage> {
   // ── Single article card ────────────────────────────────────────────────
 
   Widget _buildArticleCard(NewsArticle article) {
-    final type = _inferType(article.title);
+    final type = _inferType(article);
 
     return GestureDetector(
       onTap: () => _openArticle(article.url),

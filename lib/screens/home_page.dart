@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import '../providers/user_profile_provider.dart';
 import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
 import 'campain_detail_page.dart';
@@ -28,7 +29,8 @@ class _Campaign {
 
 class HomePage extends StatefulWidget {
   final VoidCallback? onProfileTap;
-  const HomePage({super.key, this.onProfileTap});
+  final UserProfileProvider profileProvider;
+  const HomePage({super.key, this.onProfileTap, required this.profileProvider});
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -37,10 +39,23 @@ class _HomePageState extends State<HomePage> {
   int _catIndex = 0;
   final Map<String, double> _dbTotals = {};
 
+  UserProfileProvider get _profile => widget.profileProvider;
+
   @override
   void initState() {
     super.initState();
     _loadDbTotals();
+    _profile.addListener(_onProfileChanged);
+  }
+
+  @override
+  void dispose() {
+    _profile.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  void _onProfileChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadDbTotals() async {
@@ -234,8 +249,17 @@ class _HomePageState extends State<HomePage> {
               const Spacer(),
               // Notification bell
               InkWell(
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const NotificationPage())),
+                onTap: () {
+                  const catNames = ['All', 'Disaster', 'Education', 'Medical'];
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => NotificationPage(
+                        initialCategory: catNames[_catIndex],
+                      ),
+                    ),
+                  );
+                },
                 borderRadius: BorderRadius.circular(21),
                 child: Container(
                   width: 42,
@@ -263,7 +287,13 @@ class _HomePageState extends State<HomePage> {
                       width: 2,
                     ),
                   ),
-                  child: const Icon(Icons.person, color: AppColors.primary, size: 22),
+                  child: ClipOval(
+                    child: _profile.photoFile != null
+                        ? Image.file(_profile.photoFile!,
+                            width: 42, height: 42, fit: BoxFit.cover)
+                        : const Icon(Icons.person,
+                            color: AppColors.primary, size: 22),
+                  ),
                 ),
               ),
             ],
@@ -277,9 +307,9 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Danish',
-            style: TextStyle(
+          Text(
+            _profile.firstName,
+            style: const TextStyle(
               color: AppColors.primary,
               fontSize: 26,
               fontWeight: FontWeight.w800,

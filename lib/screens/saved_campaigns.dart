@@ -1,24 +1,51 @@
 import 'package:flutter/material.dart';
+import '../services/database_helper.dart';
 
-/// Holds the list of saved/favourite campaigns. UI mockup only (no backend).
+/// Holds the list of saved/favourite campaigns. Synced with SQLite.
 class SavedCampaignsNotifier extends ChangeNotifier {
-  final List<Map<String, dynamic>> _list = [];
+  List<Map<String, dynamic>> _list = [];
+
+  SavedCampaignsNotifier() {
+    _loadFromDb();
+  }
+
+  Future<void> _loadFromDb() async {
+    final rows = await DatabaseHelper.instance.getAllSavedCampaigns();
+    _list = List<Map<String, dynamic>>.from(rows.map((r) => Map<String, dynamic>.from(r)));
+    notifyListeners();
+  }
 
   List<Map<String, dynamic>> get list => List.unmodifiable(_list);
 
   bool isSaved(String title) =>
       _list.any((c) => (c['title'] as String?) == title);
 
-  void add(Map<String, dynamic> campaign) {
+  Future<void> add(Map<String, dynamic> campaign) async {
     final title = campaign['title'] as String?;
     if (title == null || isSaved(title)) return;
-    _list.add(Map<String, dynamic>.from(campaign));
+    
+    // Convert to a properly typed map to store
+    final dataValues = {
+      'title': campaign['title'],
+      'description': campaign['description'],
+      'raised': campaign['raised'],
+      'target': campaign['target'],
+      'progress': campaign['progress'],
+      'imagePath': campaign['imagePath'],
+      'category': campaign['category'],
+    };
+
+    _list.add(Map<String, dynamic>.from(dataValues));
     notifyListeners();
+    
+    await DatabaseHelper.instance.insertSavedCampaign(dataValues);
   }
 
-  void remove(String title) {
+  Future<void> remove(String title) async {
     _list.removeWhere((c) => (c['title'] as String?) == title);
     notifyListeners();
+    
+    await DatabaseHelper.instance.deleteSavedCampaign(title);
   }
 
   void toggle(Map<String, dynamic> campaign) {
