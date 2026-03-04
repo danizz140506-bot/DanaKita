@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../app_theme.dart';
 import '../services/database_helper.dart';
 import 'saved_campaigns.dart';
@@ -115,11 +117,18 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
   void _refresh() => setState(() {});
   bool get _fav => _saved?.isSaved(widget.title) ?? false;
 
+  String get _shareText =>
+      'Support "${widget.title}" on DanaKita!\n\n'
+      '${widget.description}\n\n'
+      'Raised ${widget.raised} of ${widget.target} so far. '
+      'Every contribution counts!\n\n'
+      'Donate now on DanaKita \u2764\uFE0F';
+
   void _share() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (ctx) => Container(
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
         decoration: const BoxDecoration(
           color: AppColors.white,
@@ -149,16 +158,37 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _shareOption('assets/images/instagram.png', 'Instagram', () =>
-                    _shareFeedback(context, 'Instagram')),
-                _shareOption('assets/images/facebook.png', 'Facebook', () =>
-                    _shareFeedback(context, 'Facebook')),
-                _shareOption('assets/images/whatsapp.png', 'WhatsApp', () =>
-                    _shareFeedback(context, 'WhatsApp')),
-                _shareOption('assets/images/x.png', 'X', () =>
-                    _shareFeedback(context, 'X')),
-                _iconShareOption(Icons.link, 'Copy link', () =>
-                    _shareFeedback(context, 'Copy link')),
+                _shareOption('assets/images/instagram.png', 'Instagram', () async {
+                  final text = _shareText;
+                  Navigator.pop(ctx);
+                  await Share.share(text);
+                }),
+                _shareOption('assets/images/facebook.png', 'Facebook', () async {
+                  final text = _shareText;
+                  Navigator.pop(ctx);
+                  await Share.share(text);
+                }),
+                _shareOption('assets/images/whatsapp.png', 'WhatsApp', () async {
+                  final text = _shareText;
+                  Navigator.pop(ctx);
+                  await Share.share(text);
+                }),
+                _shareOption('assets/images/x.png', 'X', () async {
+                  final text = _shareText;
+                  Navigator.pop(ctx);
+                  await Share.share(text);
+                }),
+                _iconShareOption(Icons.link, 'Copy link', () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: _shareText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Link copied to clipboard'),
+                      backgroundColor: AppColors.primary,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }),
               ],
             ),
           ],
@@ -235,16 +265,6 @@ class _CampaignDetailPageState extends State<CampaignDetailPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _shareFeedback(BuildContext context, String option) {
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$option (placeholder)'),
-        behavior: SnackBarBehavior.floating,
       ),
     );
   }

@@ -11,10 +11,13 @@ class HistoryPage extends StatefulWidget {
   State<HistoryPage> createState() => _HistoryPageState();
 }
 
+enum _SortMode { newestFirst, oldestFirst, highestAmount, lowestAmount }
+
 class _HistoryPageState extends State<HistoryPage> {
   List<Donation> _donations = [];
   double _totalDonated = 0;
   bool _isLoading = true;
+  _SortMode _sortMode = _SortMode.newestFirst;
 
   @override
   void initState() {
@@ -45,7 +48,7 @@ class _HistoryPageState extends State<HistoryPage> {
   // ── UPDATE ──────────────────────────────────────────────────────────────
 
   Future<void> _editDonation(Donation donation) async {
-    final noteCtrl = TextEditingController(text: donation.note);
+    String noteText = donation.note;
 
     final result = await showDialog<bool>(
       context: context,
@@ -82,8 +85,9 @@ class _HistoryPageState extends State<HistoryPage> {
                       fontWeight: FontWeight.w600,
                       color: AppColors.textBody)),
               const SizedBox(height: 6),
-              TextField(
-                controller: noteCtrl,
+              TextFormField(
+                initialValue: noteText,
+                onChanged: (val) => noteText = val,
                 maxLines: 2,
                 decoration: InputDecoration(
                   hintText: 'Add a note (optional)',
@@ -117,7 +121,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     if (result == true) {
       final updated = donation.copyWith(
-        note: noteCtrl.text.trim(),
+        note: noteText.trim(),
       );
 
       await DatabaseHelper.instance.updateDonation(updated);
@@ -132,8 +136,6 @@ class _HistoryPageState extends State<HistoryPage> {
         );
       }
     }
-
-    noteCtrl.dispose();
   }
 
   // ── DELETE ──────────────────────────────────────────────────────────────
@@ -216,6 +218,47 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
+  List<Donation> get _sortedDonations {
+    final list = List<Donation>.from(_donations);
+    switch (_sortMode) {
+      case _SortMode.newestFirst:
+        list.sort((a, b) => b.date.compareTo(a.date));
+      case _SortMode.oldestFirst:
+        list.sort((a, b) => a.date.compareTo(b.date));
+      case _SortMode.highestAmount:
+        list.sort((a, b) => b.total.compareTo(a.total));
+      case _SortMode.lowestAmount:
+        list.sort((a, b) => a.total.compareTo(b.total));
+    }
+    return list;
+  }
+
+  String _sortLabel(_SortMode mode) {
+    switch (mode) {
+      case _SortMode.newestFirst:
+        return 'Newest first';
+      case _SortMode.oldestFirst:
+        return 'Oldest first';
+      case _SortMode.highestAmount:
+        return 'Highest amount';
+      case _SortMode.lowestAmount:
+        return 'Lowest amount';
+    }
+  }
+
+  IconData _sortIcon(_SortMode mode) {
+    switch (mode) {
+      case _SortMode.newestFirst:
+        return Icons.arrow_downward_rounded;
+      case _SortMode.oldestFirst:
+        return Icons.arrow_upward_rounded;
+      case _SortMode.highestAmount:
+        return Icons.trending_up_rounded;
+      case _SortMode.lowestAmount:
+        return Icons.trending_down_rounded;
+    }
+  }
+
   // ── BUILD ──────────────────────────────────────────────────────────────
 
   @override
@@ -242,6 +285,9 @@ class _HistoryPageState extends State<HistoryPage> {
         children: [
           // ── Summary header ──
           _buildHeader(),
+
+          // ── Sort row ──
+          if (_donations.isNotEmpty) _buildSortRow(),
 
           // ── List ──
           Expanded(child: _buildBody()),
@@ -296,6 +342,70 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
+  Widget _buildSortRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.sort_rounded, size: 18, color: AppColors.textMuted),
+          const SizedBox(width: 6),
+          const Text('Sort by',
+              style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SizedBox(
+              height: 34,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: _SortMode.values.map((mode) {
+                  final selected = mode == _sortMode;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _sortMode = mode),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppColors.primaryLight
+                              : AppColors.white,
+                          borderRadius: BorderRadius.circular(AppRadius.xl),
+                          border: selected
+                              ? null
+                              : Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_sortIcon(mode),
+                                size: 14,
+                                color: selected
+                                    ? Colors.white
+                                    : AppColors.textBody),
+                            const SizedBox(width: 4),
+                            Text(_sortLabel(mode),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: selected
+                                        ? Colors.white
+                                        : AppColors.textBody)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_isLoading) {
       return const Center(
@@ -324,14 +434,15 @@ class _HistoryPageState extends State<HistoryPage> {
       );
     }
 
+    final sorted = _sortedDonations;
     return RefreshIndicator(
       color: AppColors.primary,
       onRefresh: _loadDonations,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        itemCount: _donations.length,
+        itemCount: sorted.length,
         itemBuilder: (_, i) {
-          final donation = _donations[i];
+          final donation = sorted[i];
           return FadeIn(
             delay: Duration(milliseconds: 60 * i),
             child: Padding(
@@ -396,6 +507,12 @@ class _HistoryPageState extends State<HistoryPage> {
                     Text(donation.formattedDate,
                         style: const TextStyle(
                             fontSize: 13, color: AppColors.textMuted)),
+                    if (donation.transactionId.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(donation.transactionId,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textHint)),
+                    ],
                     if (donation.note.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(donation.note,

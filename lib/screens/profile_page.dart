@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../app_theme.dart';
 import '../providers/user_profile_provider.dart';
+import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
 import 'help_support_page.dart';
 import 'history_page.dart';
@@ -26,11 +27,32 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _photoRemoved = false;
   final _picker = ImagePicker();
 
+  // ── Dynamic stats ──
+  double _totalGiven = 0;
+  int _campaignCount = 0;
+
   @override
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: _profile.displayName);
     _profile.addListener(_onProfileChanged);
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final total = await DatabaseHelper.instance.getTotalDonated();
+      final campaigns = await DatabaseHelper.instance.getUniqueCampaignCount();
+
+      if (mounted) {
+        setState(() {
+          _totalGiven = total;
+          _campaignCount = campaigns;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading profile stats: $e');
+    }
   }
 
   @override
@@ -456,6 +478,16 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  String get _formattedTotal {
+    if (_totalGiven >= 1000000) {
+      return 'RM ${(_totalGiven / 1000000).toStringAsFixed(1)}M';
+    }
+    if (_totalGiven >= 1000) {
+      return 'RM ${(_totalGiven / 1000).toStringAsFixed(1)}K';
+    }
+    return 'RM ${_totalGiven.toStringAsFixed(2)}';
+  }
+
   Widget _buildStatsRow() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20),
@@ -466,11 +498,11 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       child: Row(
         children: [
-          _stat('RM 1,200', 'Total Given'),
+          _stat(_formattedTotal, 'Total Given'),
           _dividerVert(),
-          _stat('24', 'Campaigns'),
+          _stat('$_campaignCount', 'Campaigns'),
           _dividerVert(),
-          _stat('5', 'Months'),
+          _stat('${_profile.accountAgeDays}', 'Days'),
         ],
       ),
     );
@@ -478,18 +510,25 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _stat(String value, String label) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(value,
-              style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primaryLight)),
-          const SizedBox(height: 4),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.textMuted)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value,
+                  maxLines: 1,
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primaryLight)),
+            ),
+            const SizedBox(height: 4),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textMuted)),
+          ],
+        ),
       ),
     );
   }
@@ -509,8 +548,11 @@ class _ProfilePageState extends State<ProfilePage> {
           _menuItem(
             icon: Icons.history_rounded,
             label: 'Donation History',
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const HistoryPage())),
+            onTap: () async {
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const HistoryPage()));
+              _loadStats(); // refresh stats when returning
+            },
           ),
           const Divider(height: 0, indent: 60),
           _menuItem(

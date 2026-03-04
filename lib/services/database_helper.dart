@@ -111,6 +111,24 @@ class DatabaseHelper {
     return (result.first['cnt'] as int?) ?? 0;
   }
 
+  /// Get the number of unique campaigns the user has donated to.
+  Future<int> getUniqueCampaignCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+        'SELECT COUNT(DISTINCT campaign) as cnt FROM donations');
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Get the date of the first donation (oldest), or null if none.
+  Future<DateTime?> getFirstDonationDate() async {
+    final db = await database;
+    final result =
+        await db.rawQuery('SELECT MIN(date) as earliest FROM donations');
+    final earliest = result.first['earliest'] as String?;
+    if (earliest == null) return null;
+    return DateTime.tryParse(earliest);
+  }
+
   // ── UPDATE ──────────────────────────────────────────────────────────────
 
   /// Update an existing donation. Returns number of rows affected.

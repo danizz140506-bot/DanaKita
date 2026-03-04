@@ -10,9 +10,12 @@ class ExplorePage extends StatefulWidget {
   State<ExplorePage> createState() => _ExplorePageState();
 }
 
+enum _CampaignSort { defaultOrder, mostFunded, leastFunded, alphabetical }
+
 class _ExplorePageState extends State<ExplorePage> {
   int _catIndex = 0;
   String _query = '';
+  _CampaignSort _sortMode = _CampaignSort.defaultOrder;
 
   // DB donation totals per campaign
   final Map<String, double> _dbTotals = {};
@@ -99,7 +102,63 @@ class _ExplorePageState extends State<ExplorePage> {
             (c['description'] as String).toLowerCase().contains(q);
       }).toList();
     }
+
+    // Apply sorting
+    switch (_sortMode) {
+      case _CampaignSort.defaultOrder:
+        break;
+      case _CampaignSort.mostFunded:
+        list.sort((a, b) {
+          final pA = _progressFor(a);
+          final pB = _progressFor(b);
+          return pB.compareTo(pA);
+        });
+      case _CampaignSort.leastFunded:
+        list.sort((a, b) {
+          final pA = _progressFor(a);
+          final pB = _progressFor(b);
+          return pA.compareTo(pB);
+        });
+      case _CampaignSort.alphabetical:
+        list.sort((a, b) =>
+            (a['title'] as String).compareTo(b['title'] as String));
+    }
     return list;
+  }
+
+  double _progressFor(Map<String, dynamic> c) {
+    final title = c['title'] as String;
+    final baseRaised = _parseAmount(c['raised'] as String);
+    final goal = _parseAmount(c['target'] as String);
+    final dbTotal = _dbTotals[title] ?? 0;
+    final current = baseRaised + dbTotal;
+    return goal > 0 ? current / goal : (c['progress'] as num).toDouble();
+  }
+
+  String _campaignSortLabel(_CampaignSort mode) {
+    switch (mode) {
+      case _CampaignSort.defaultOrder:
+        return 'Default';
+      case _CampaignSort.mostFunded:
+        return 'Most funded';
+      case _CampaignSort.leastFunded:
+        return 'Least funded';
+      case _CampaignSort.alphabetical:
+        return 'A - Z';
+    }
+  }
+
+  IconData _campaignSortIcon(_CampaignSort mode) {
+    switch (mode) {
+      case _CampaignSort.defaultOrder:
+        return Icons.swap_vert_rounded;
+      case _CampaignSort.mostFunded:
+        return Icons.trending_up_rounded;
+      case _CampaignSort.leastFunded:
+        return Icons.trending_down_rounded;
+      case _CampaignSort.alphabetical:
+        return Icons.sort_by_alpha_rounded;
+    }
   }
 
   @override
@@ -162,7 +221,11 @@ class _ExplorePageState extends State<ExplorePage> {
 
             // Categories
             _buildCategoryChips(),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+
+            // Sort row
+            _buildSortRow(),
+            const SizedBox(height: 4),
 
             // Results
             Expanded(
@@ -231,6 +294,70 @@ class _ExplorePageState extends State<ExplorePage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildSortRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          const Icon(Icons.sort_rounded, size: 16, color: AppColors.textMuted),
+          const SizedBox(width: 6),
+          const Text('Sort',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SizedBox(
+              height: 30,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: _CampaignSort.values.map((mode) {
+                  final selected = mode == _sortMode;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _sortMode = mode),
+                      child: AnimatedContainer(
+                        duration: AppDurations.fast,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppColors.primaryLight
+                              : AppColors.white,
+                          borderRadius: BorderRadius.circular(AppRadius.xl),
+                          border: selected
+                              ? null
+                              : Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_campaignSortIcon(mode),
+                                size: 13,
+                                color: selected
+                                    ? Colors.white
+                                    : AppColors.textBody),
+                            const SizedBox(width: 4),
+                            Text(_campaignSortLabel(mode),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: selected
+                                        ? Colors.white
+                                        : AppColors.textBody)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

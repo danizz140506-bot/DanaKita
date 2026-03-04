@@ -5,6 +5,7 @@ import '../app_theme.dart';
 import '../models/payment_method.dart';
 import '../models/payment_result.dart';
 import '../services/payment_api_service.dart';
+import '../services/biometric_service.dart';
 
 // ── CHIP brand colors ────────────────────────────────────────────────────────
 
@@ -70,6 +71,24 @@ class _ChipCheckoutPageState extends State<ChipCheckoutPage> {
 
   Future<void> _pay() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // ── Biometric / PIN verification before payment ──
+    final bioAvailable = await BiometricService.isAvailable();
+    if (bioAvailable) {
+      final authenticated = await BiometricService.authenticate(
+        reason: 'Authenticate to confirm your RM ${widget.total.toStringAsFixed(2)} donation',
+      );
+      if (!authenticated) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Authentication failed. Please try again.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
+    }
 
     setState(() => _isProcessing = true);
 

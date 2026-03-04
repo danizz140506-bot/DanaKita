@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import '../models/payment_result.dart';
 
@@ -59,6 +60,8 @@ class PaymentApiService {
 
         if (response.statusCode == 201 || response.statusCode == 200) {
           final Map<String, dynamic> data = json.decode(response.body);
+          // Generate a unique transaction ID (API returns a placeholder)
+          data['id'] = _generateUniqueId();
           return PaymentResult.fromJson(data);
         } else {
           throw Exception('Payment failed (status ${response.statusCode})');
@@ -76,6 +79,16 @@ class PaymentApiService {
 
     // All retries exhausted.
     throw lastError ?? Exception('Payment failed. Please try again later.');
+  }
+
+  /// Generates a unique transaction ID combining timestamp and random hex.
+  /// Example: 20260304143052-A7F3
+  static int _generateUniqueId() {
+    final now = DateTime.now();
+    final timePart = now.millisecondsSinceEpoch ~/ 1000; // unix seconds
+    final rand = Random().nextInt(0xFFFF); // 0–65535
+    // Combine into a unique int (fits in 64-bit)
+    return timePart * 100000 + rand;
   }
 }
 

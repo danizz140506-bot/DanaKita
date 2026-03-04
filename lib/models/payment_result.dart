@@ -61,7 +61,11 @@ class PaymentResult {
     );
   }
 
-  /// Formatted transaction ID (e.g. "TXN-00101").
-  String get formattedId => 'TXN-${transactionId.toString().padLeft(5, '0')}';
+  /// Formatted transaction ID (e.g. "TXN-1741098052-A7F3").
+  String get formattedId {
+    final hex = (transactionId % 100000).toRadixString(16).toUpperCase().padLeft(4, '0');
+    final ts = transactionId ~/ 100000;
+    return 'TXN-$ts-$hex';
+  }
 }
 

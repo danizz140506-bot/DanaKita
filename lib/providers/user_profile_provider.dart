@@ -8,10 +8,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserProfileProvider extends ChangeNotifier {
   static const _keyName = 'user_display_name';
   static const _keyPhoto = 'user_photo_path';
+  static const _keyCreated = 'account_created_at';
   static const defaultName = 'Danish Iskandar';
 
   String _displayName = defaultName;
   String? _photoPath;
+  DateTime? _createdAt;
   bool _loaded = false;
 
   // ── Getters ──────────────────────────────────────────────────────────────
@@ -26,7 +28,15 @@ class UserProfileProvider extends ChangeNotifier {
       _photoPath != null ? File(_photoPath!) : null;
 
   String? get photoPath => _photoPath;
+  DateTime? get createdAt => _createdAt;
   bool get loaded => _loaded;
+
+  /// Number of days since account was created.
+  int get accountAgeDays {
+    if (_createdAt == null) return 0;
+    final days = DateTime.now().difference(_createdAt!).inDays;
+    return days < 1 ? 1 : days;
+  }
 
   // ── Init ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +49,14 @@ class UserProfileProvider extends ChangeNotifier {
     if (_photoPath != null && !File(_photoPath!).existsSync()) {
       _photoPath = null;
       await prefs.remove(_keyPhoto);
+    }
+    // Record account creation date on first launch
+    final createdStr = prefs.getString(_keyCreated);
+    if (createdStr != null) {
+      _createdAt = DateTime.tryParse(createdStr);
+    } else {
+      _createdAt = DateTime.now();
+      await prefs.setString(_keyCreated, _createdAt!.toIso8601String());
     }
     _loaded = true;
     notifyListeners();

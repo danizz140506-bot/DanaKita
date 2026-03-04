@@ -9,6 +9,7 @@ import '../models/payment_result.dart';
 import '../services/database_helper.dart';
 // PaymentApiService is called from ChipCheckoutPage
 import 'chip_checkout_page.dart';
+import '../services/notification_service.dart';
 
 // ── Payment category data (no DuitNow QR) ────────────────────────────────────
 
@@ -220,6 +221,14 @@ class _DonatePageState extends State<DonatePage> {
     }
 
     if (!mounted) return;
+
+    // Fire a local push notification for donation success
+    NotificationService().showDonationSuccess(
+      campaign: widget.campaignTitle ?? 'General Fund',
+      amount: _amount,
+      transactionId: result.formattedId,
+    );
+
     _showSuccessDialog(result);
   }
 

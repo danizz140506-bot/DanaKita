@@ -1,9 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app_theme.dart';
 import '../widgets/fade_in_widget.dart';
 
 class HelpSupportPage extends StatelessWidget {
   const HelpSupportPage({super.key});
+
+  // ── URL launcher helper ──────────────────────────────────────────────────
+
+  Future<void> _launch(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open $url'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,11 +44,22 @@ class HelpSupportPage extends StatelessWidget {
               icon: Icons.contact_support_rounded,
               title: 'Contact us',
               children: [
-                _contactRow(Icons.email_outlined, 'support@danakita.my'),
+                _contactRow(
+                  Icons.email_outlined,
+                  'support@danakita.my',
+                  onTap: () => _launch(context, 'mailto:support@danakita.my'),
+                ),
                 const SizedBox(height: 12),
-                _contactRow(Icons.phone_outlined, '+60 3-1234 5678'),
+                _contactRow(
+                  Icons.phone_outlined,
+                  '+60 3-1234 5678',
+                  onTap: () => _launch(context, 'tel:+60312345678'),
+                ),
                 const SizedBox(height: 12),
-                _contactRow(Icons.schedule_rounded, 'Mon–Fri, 9am–6pm'),
+                _contactRow(
+                  Icons.schedule_rounded,
+                  'Mon\u2013Fri, 9am\u20136pm',
+                ),
               ],
             ),
           ),
@@ -69,9 +98,12 @@ class HelpSupportPage extends StatelessWidget {
               icon: Icons.description_outlined,
               title: 'Resources',
               children: [
-                _resourceRow('Terms of Service', () {}),
-                _resourceRow('Privacy Policy', () {}),
-                _resourceRow('Community Guidelines', () {}),
+                _resourceRow('Terms of Service',
+                    () => _launch(context, 'https://danakita.my/terms')),
+                _resourceRow('Privacy Policy',
+                    () => _launch(context, 'https://danakita.my/privacy')),
+                _resourceRow('Community Guidelines',
+                    () => _launch(context, 'https://danakita.my/guidelines')),
               ],
             ),
           ),
@@ -124,19 +156,36 @@ class HelpSupportPage extends StatelessWidget {
     );
   }
 
-  Widget _contactRow(IconData icon, String text) {
-    return Row(
+  Widget _contactRow(IconData icon, String text, {VoidCallback? onTap}) {
+    final row = Row(
       children: [
         Icon(icon, size: 20, color: AppColors.textMuted),
         const SizedBox(width: 12),
-        Text(
-          text,
-          style: const TextStyle(
-            fontSize: 14,
-            color: AppColors.textBody,
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              color: onTap != null ? AppColors.primaryLight : AppColors.textBody,
+              fontWeight: onTap != null ? FontWeight.w500 : FontWeight.normal,
+            ),
           ),
         ),
+        if (onTap != null)
+          const Icon(Icons.chevron_right_rounded,
+              size: 18, color: AppColors.iconMuted),
       ],
+    );
+
+    if (onTap == null) return row;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: row,
+      ),
     );
   }
 

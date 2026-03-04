@@ -5,6 +5,7 @@ import '../services/database_helper.dart';
 import '../widgets/fade_in_widget.dart';
 import 'campain_detail_page.dart';
 import 'notification_page.dart';
+import '../services/quote_service.dart';
 
 const String _catDisaster = 'disaster';
 const String _catEducation = 'education';
@@ -38,14 +39,32 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _catIndex = 0;
   final Map<String, double> _dbTotals = {};
+  Quote? _dailyQuote;
 
   UserProfileProvider get _profile => widget.profileProvider;
+
+  String get _greeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning,';
+    if (hour < 17) return 'Good Afternoon,';
+    return 'Good Evening,';
+  }
 
   @override
   void initState() {
     super.initState();
     _loadDbTotals();
     _profile.addListener(_onProfileChanged);
+    _fetchQuote();
+  }
+
+  Future<void> _fetchQuote() async {
+    final quote = await QuoteService.fetchRandom();
+    if (mounted) {
+      setState(() {
+        _dailyQuote = quote;
+      });
+    }
   }
 
   @override
@@ -299,9 +318,9 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Good Morning,',
-            style: TextStyle(
+          Text(
+            _greeting,
+            style: const TextStyle(
               color: Colors.black,
               fontSize: 15,
             ),
@@ -316,14 +335,67 @@ class _HomePageState extends State<HomePage> {
               letterSpacing: -0.5,
             ),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Make a difference today',
-            style: TextStyle(
-              color: Colors.black,
-              fontSize: 14,
+          const SizedBox(height: 12),
+          if (_dailyQuote != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.white.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: AppColors.white.withValues(alpha: 0.8)),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '"${_dailyQuote!.text}"',
+                    style: const TextStyle(
+                      color: AppColors.textDark,
+                      fontSize: 14,
+                      fontStyle: FontStyle.italic,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: _fetchQuote, // refresh quote on tap
+                        child: const Icon(
+                          Icons.refresh_rounded,
+                          size: 16,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      Text(
+                        '— ${_dailyQuote!.author}',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            )
+          else
+            const Text(
+              'Make a difference today',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 14,
+              ),
             ),
-          ),
         ],
       ),
     );

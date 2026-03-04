@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'screens/loading_page.dart';
 import 'screens/saved_campaigns.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService().initialize();
   final savedNotifier = SavedCampaignsNotifier();
   SavedNotifierProvider.setFallback(savedNotifier);
   runApp(MyApp(savedNotifier: savedNotifier));
